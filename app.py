@@ -22,6 +22,7 @@ from tga_tables import (
 )
 from green_report import save_green_report
 from icerik_hub import (
+    AMAC_GRUPLARI,
     ICERIK_TURLERI,
     ISKELETLER,
     TEMALAR,
@@ -981,13 +982,16 @@ def adim_sonuc():
 
 
 # ==============================================
-# ADIM 5 - İÇERİK MERKEZİ (İSKELET v1)
+# ADIM 5 - İÇERİK MERKEZİ (CONTENT ENGINE v2)
 # ==============================================
 def _icerik_karti(fac_id, tur):
     tur_id = tur["id"]
     defaults = varsayilan_tercih(tur_id)
     p = {**defaults, **(get_content_prefs(fac_id, tur_id) or {})}
 
+    cikti_chips = "".join(
+        f'<span class="chip" style="font-size:11px;">🖨️ {c}</span>' for c in tur.get("ciktilar", [])
+    )
     st.markdown(
         f'<div class="data-card" style="margin-top:10px;">'
         f'<div style="display:flex; justify-content:space-between; align-items:center;">'
@@ -995,6 +999,7 @@ def _icerik_karti(fac_id, tur):
         f'<span class="chip" style="margin:0;">🚧 Planlama</span>'
         f'</div>'
         f'<p style="color:#6b7a70; font-size:13.5px; margin-top:8px;">{tur["aciklama"]}</p>'
+        f'<div style="margin-top:6px;">{cikti_chips}</div>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -1061,42 +1066,37 @@ def adim_icerik():
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="banner">Buradan tüm sürdürülebilirlik içeriklerinizi tek panelden '
-        'yapılandırırsınız: rapor, web sayfası, broşür, QR kart, politika, anket ve eğitim '
-        'kayıtları. Şu anda <strong>planlama aşamasındayız</strong>: tasarım tercihlerinizi '
-        'seçip kaydediyoruz; içerik metinleri araştırma tamamlanınca (ileride AI destekli) '
-        'otomatik üretilecek.</div>',
+        '<div class="banner">İçerik Merkezi, tek veri havuzunu farklı amaçlara dönüştüren '
+        '<strong>Content Engine</strong> mantığıyla çalışır: önce amacı seçin '
+        '(Raporlama · İletişim · Politikalar · Eğitim &amp; Anket), sonra tasarım tercihlerinizi '
+        'belirleyin. Şu anda <strong>planlama aşamasındayız</strong>: üretim kapalı; '
+        'tercihleriniz kaydediliyor, içerik araştırma tamamlanınca üretim aktifleşecek.</div>',
         unsafe_allow_html=True,
     )
 
-    # Türleri sekmelere grupla (anket -> alt sekmeler)
+    # Amaca göre gruplar (AMAC_GRUPLARI); boş grup gösterilmez
     gruplar = []
-    for tur in ICERIK_TURLERI:
-        if tur.get("grup"):
-            mevcut = next((g for g in gruplar if g["id"] == tur["grup"]), None)
-            if mevcut:
-                mevcut["turler"].append(tur)
-            else:
-                gruplar.append({
-                    "id": tur["grup"], "emoji": tur["emoji"], "baslik": tur["baslik"],
-                    "turler": [tur],
-                })
-        else:
-            gruplar.append({
-                "id": tur["id"], "emoji": tur["emoji"], "baslik": tur["baslik"],
-                "turler": [tur],
-            })
+    for g in AMAC_GRUPLARI:
+        turler = [t for t in ICERIK_TURLERI if t.get("grup") == g["id"]]
+        if not turler:
+            continue
+        gruplar.append({**g, "turler": turler})
 
     tabs = st.tabs([f'{g["emoji"]} {g["baslik"]}' for g in gruplar])
     for tab, g in zip(tabs, gruplar):
         with tab:
-            if len(g["turler"]) == 1:
-                _icerik_karti(tesis["id"], g["turler"][0])
-            else:
-                alt_tabs = st.tabs([t["alt_baslik"] for t in g["turler"]])
-                for at, t in zip(alt_tabs, g["turler"]):
-                    with at:
-                        _icerik_karti(tesis["id"], t)
+            # Alt grup (örn. anket) paylaşanlar alt sekmelerde, tek olanlar kart olarak
+            yiginlar = {}
+            for t in g["turler"]:
+                yiginlar.setdefault(t.get("alt_grup", t["id"]), []).append(t)
+            for yig in yiginlar.values():
+                if len(yig) == 1:
+                    _icerik_karti(tesis["id"], yig[0])
+                else:
+                    alt_tabs = st.tabs([t["alt_baslik"] for t in yig])
+                    for at, t in zip(alt_tabs, yig):
+                        with at:
+                            _icerik_karti(tesis["id"], t)
 
     st.markdown("---")
     if st.button("← Tesis Seçimine Dön", type="secondary"):

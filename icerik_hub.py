@@ -1,18 +1,32 @@
 # ============================================
-# KarbonAT - İçerik Merkezi (İskelet v1)
-# Sürdürülebilirlik içerik türleri, planlanan yapılar,
-# tasarım tercihleri ve AI'a hazır tercih katmanı.
+# KarbonAT - İçerik Merkezi (Content Engine v2)
+# Sürdürülebilirlik içerik türleri, amaca göre gruplar,
+# planlanan yapılar, tasarım tercihleri ve AI'a hazır katman.
+#
+# MİMARİ (GPT dönütü uyumlu):
+#   Veriler -> Content Engine -> Şablonlar -> Çıktılar
+#   Aynı veri havuzu, onlarca farklı formatta (PDF/Web/QR/Sosyal).
 #
 # NOT: Üretim/indirme katmanı şimdilik DEAKTİF.
-# İçerik metinleri araştırma tamamlanınca (ileride AI destekli)
-# bu tercih yapısından otomatik üretilecek.
+# GENERATORLAR içindeki her girdi, ilgili türün üretici fonksiyonuna
+# bağlanınca aktifleşecek. AI'sız şablon motoru bu sürümde yok.
 # ============================================
+
+# Amaca göre gruplar (İçerik Merkezi üst sekmeleri)
+AMAC_GRUPLARI = [
+    {"id": "raporlama", "emoji": "📄", "baslik": "Raporlama"},
+    {"id": "iletisim", "emoji": "🌐", "baslik": "İletişim"},
+    {"id": "politikalar", "emoji": "📋", "baslik": "Politikalar"},
+    {"id": "egitim_anket", "emoji": "🎓", "baslik": "Eğitim & Anket"},
+]
 
 ICERIK_TURLERI = [
     {
         "id": "rapor",
+        "grup": "raporlama",
         "emoji": "📄",
         "baslik": "Sürdürülebilirlik Raporu",
+        "ciktilar": ["PDF", "Excel", "Web"],
         "aciklama": (
             "Tesisin gerçek tüketim verilerinden üretilecek resmî sürdürülebilirlik raporu. "
             "Yönetim mesajı, karbon/su/atık performansı, hedefler ve TGA tablo referanslarını içerecek."
@@ -20,8 +34,10 @@ ICERIK_TURLERI = [
     },
     {
         "id": "web",
+        "grup": "iletisim",
         "emoji": "🌐",
         "baslik": "Web Sayfası İçeriği",
+        "ciktilar": ["Web", "PDF"],
         "aciklama": (
             "Otel web sitesindeki sürdürülebilirlik sayfası için hazır metin, KPI bloğu ve görsel yapı. "
             "A6 Doğru Tanıtım kurallarına uygun, gerçek veriye dayalı iddialar."
@@ -29,8 +45,10 @@ ICERIK_TURLERI = [
     },
     {
         "id": "brosur",
+        "grup": "iletisim",
         "emoji": "📖",
         "baslik": "Misafir Broşürü",
+        "ciktilar": ["PDF", "Web"],
         "aciklama": (
             "1 sayfalık misafir broşürü (PDF). Çift dilli tasarım, istatistik vurgulu, "
             "QR ile veri doğrulama."
@@ -38,28 +56,66 @@ ICERIK_TURLERI = [
     },
     {
         "id": "qr",
+        "grup": "iletisim",
         "emoji": "📱",
         "baslik": "QR / Oda Kartı",
+        "ciktilar": ["QR", "PDF"],
         "aciklama": (
             "Oda kapı kartı boyutunda QR içerikli kart. Kısa mesaj + öne çıkan istatistik + "
             "sürdürülebilirlik sayfasına yönlendirme."
         ),
     },
     {
+        "id": "basin_bulteni",
+        "grup": "iletisim",
+        "emoji": "📰",
+        "baslik": "Basın Bülteni",
+        "ciktilar": ["PDF", "Web", "Medya"],
+        "aciklama": (
+            "Tesisin sürdürülebilirlik başarılarını medyaya sunmak için basın bülteni taslağı; "
+            "somut rakamlar ve yönetim görüşü içerir."
+        ),
+    },
+    {
+        "id": "sosyal_medya",
+        "grup": "iletisim",
+        "emoji": "📣",
+        "baslik": "Sosyal Medya",
+        "ciktilar": ["Instagram", "LinkedIn", "X"],
+        "aciklama": (
+            "Instagram, LinkedIn ve X için platform bazında içerik paketi; gönderi metinleri, "
+            "hashtag setleri ve A6 uyumlu green-claims."
+        ),
+    },
+    {
         "id": "politika",
+        "grup": "politikalar",
         "emoji": "📋",
         "baslik": "Politika Özeti",
+        "ciktilar": ["PDF", "Web"],
         "aciklama": (
             "1 sayfalık sürdürülebilirlik politikası özeti. TGA'nın politika metninden ilham alınarak "
             "tesis verileriyle doldurulacak."
         ),
     },
     {
+        "id": "egitim",
+        "grup": "egitim_anket",
+        "emoji": "🎓",
+        "baslik": "Eğitim Kayıtları",
+        "ciktilar": ["Excel", "PDF"],
+        "aciklama": (
+            "Personel eğitim kayıtları modülü (A4). Eğitim takvimi, katılımcı listesi ve sertifika kaydı."
+        ),
+    },
+    {
         "id": "anket_misafir",
+        "grup": "egitim_anket",
+        "alt_grup": "anket",
+        "alt_baslik": "Misafir Anketi",
         "emoji": "📊",
         "baslik": "Anket Şablonu",
-        "grup": "anket",
-        "alt_baslik": "Misafir Anketi",
+        "ciktilar": ["PDF", "Web", "Excel"],
         "aciklama": (
             "Misafir memnuniyet + sürdürülebilirlik anketi şablonu (A5). Kağıt veya dijital sunuma "
             "hazır soru seti."
@@ -67,20 +123,14 @@ ICERIK_TURLERI = [
     },
     {
         "id": "anket_personel",
+        "grup": "egitim_anket",
+        "alt_grup": "anket",
+        "alt_baslik": "Personel Anketi",
         "emoji": "📊",
         "baslik": "Anket Şablonu",
-        "grup": "anket",
-        "alt_baslik": "Personel Anketi",
+        "ciktilar": ["PDF", "Web", "Excel"],
         "aciklama": (
             "Personel sürdürülebilirlik farkındalığı ve eğitim geri bildirim anketi şablonu (A4)."
-        ),
-    },
-    {
-        "id": "egitim",
-        "emoji": "🎓",
-        "baslik": "Eğitim Kayıtları",
-        "aciklama": (
-            "Personel eğitim kayıtları modülü (A4). Eğitim takvimi, katılımcı listesi ve sertifika kaydı."
         ),
     },
 ]
@@ -122,6 +172,21 @@ ISKELETLER = {
         "Arka yüz — 3-4 ikon + sayı (enerji/su/atık)",
         "Dil seçeneği (TR/EN)",
     ],
+    "basin_bulteni": [
+        "Başlık / manşet",
+        "Spot paragraf (özet)",
+        "Tesis & sürdürülebilirlik bilgileri",
+        "Somut rakamlar ve başarılar",
+        "Yönetimden alıntı (quote)",
+        "Medya iletişim bilgileri",
+    ],
+    "sosyal_medya": [
+        "Platforma göre gönderi metinleri (Instagram/LinkedIn/X)",
+        "Hashtag setleri",
+        "Görsel alt yazıları",
+        "Aylık içerik takvimi",
+        "Green-claim uyarı notu (A6)",
+    ],
     "politika": [
         "Amaç & Kapsam",
         "Taahhüt maddeleri (çevre, topluluk, misafir, çalışan)",
@@ -153,12 +218,25 @@ ISKELETLER = {
     ],
 }
 
-# Ortak tasarım tercihleri (her türde)
+# Ortak tasarım tercihleri (GPT'nin 7 adımlı akışı; her türde)
 ORTAK_SORULAR = [
+    {
+        "anahtar": "amac",
+        "soru": "🎯 Amaç",
+        "secenekler": ["Bilgilendirme", "Pazarlama", "Denetim", "Eğitim"],
+    },
+    {
+        "anahtar": "hedef_kitle",
+        "soru": "👥 Hedef Kitle",
+        "secenekler": ["Misafir", "Denetçi", "Personel", "Yönetim", "Tedarikçi", "Yatırımcı"],
+    },
     {
         "anahtar": "ton",
         "soru": "Ton & Ses",
-        "secenekler": ["Kurumsal & Resmi", "Sıcak & Samimi", "Modern & Enerjik", "Sade & Şeffaf"],
+        "secenekler": [
+            "Kurumsal & Resmi", "Sıcak & Samimi", "Modern & Enerjik",
+            "Sade & Şeffaf", "Lüks & Zarif", "Teknik & Detaylı",
+        ],
     },
     {
         "anahtar": "dil",
@@ -222,6 +300,25 @@ TURE_OZEL_SORULAR = {
             "secenekler": ["Web sürdürülebilirlik sayfası", "Yeşil rapor", "İletişim"],
         },
     ],
+    "basin_bulteni": [
+        {
+            "anahtar": "kapsam",
+            "soru": "Bülten Kapsamı",
+            "secenekler": ["Yeni başarı duyurusu", "Yıllık sonuç özeti", "Genel tanıtım"],
+        },
+    ],
+    "sosyal_medya": [
+        {
+            "anahtar": "platform",
+            "soru": "Öncelikli Platform",
+            "secenekler": ["Instagram", "LinkedIn", "X", "Tümü"],
+        },
+        {
+            "anahtar": "icerik_turu",
+            "soru": "İçerik Türü",
+            "secenekler": ["İstatistik paylaşımı", "Hikaye / arka plan", "Etkinlik duyurusu", "Karma"],
+        },
+    ],
     "politika": [
         {
             "anahtar": "kapsam",
@@ -277,6 +374,22 @@ TURE_OZEL_SORULAR = {
     ],
 }
 
+# Generator registry — üretim katmanı DEAKTİF.
+# Her girdi, ilgili türün üretici fonksiyonuna bağlanınca aktifleşir.
+# İmza:  generator(tesis: dict, sonuc: dict | None, prefs: dict) -> bytes
+GENERATORLAR = {
+    "rapor": None,
+    "web": None,
+    "brosur": None,
+    "qr": None,
+    "basin_bulteni": None,
+    "sosyal_medya": None,
+    "politika": None,
+    "egitim": None,
+    "anket_misafir": None,
+    "anket_personel": None,
+}
+
 # Görsel temalar (üretim aşamasında palete uygulanacak)
 TEMALAR = {
     "orman": {"ad": "🌿 Orman", "renkler": ["#1d6b45", "#2e8b57", "#3da873", "#b7d8c2"]},
@@ -290,6 +403,8 @@ TEMALAR = {
 def varsayilan_tercih(tur_id):
     """Her içerik türü için varsayılan tercih sözlüğü."""
     return {
+        "amac": "Bilgilendirme",
+        "hedef_kitle": "Misafir",
         "ton": "Kurumsal & Resmi",
         "dil": "Türkçe",
         "vurgu": "Çevre & İklim",
@@ -309,3 +424,8 @@ def tur_bul(tur_id):
         if tur["id"] == tur_id:
             return tur
     return None
+
+
+def generator_aktif_mi(tur_id):
+    """İlgili türün üreticisi bağlı mı (üretim aktif mi)?"""
+    return bool(GENERATORLAR.get(tur_id))
