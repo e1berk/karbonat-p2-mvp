@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Uygulama verisi (kullanıcı kayıtları yerelde saklanır, repo'ya gitmez)
+data/
+
+# Streamlit
+.streamlit/
+
+# Sistem
+Thumbs.db
+.DS_Store
