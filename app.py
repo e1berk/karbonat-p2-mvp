@@ -366,10 +366,16 @@ def auth_screen():
 
     col = st.columns([2, 3, 2])[1]
 
-    tab_giris, tab_kayit = st.tabs(["🔑 Giriş Yap", "✨ Yeni Hesap"])
+    with col:
+        secim = st.segmented_control(
+            "Giriş türü",
+            options=["🔑 Giriş Yap", "✨ Kayıt Ol"],
+            default="🔑 Giriş Yap",
+            key="auth_mode",
+            label_visibility="collapsed",
+        )
 
-    with tab_giris:
-        with col:
+        if secim == "🔑 Giriş Yap":
             username = st.text_input("Kullanıcı adı", key="auth_uname")
             password = st.text_input("Şifre", type="password", key="auth_pw")
             if st.button("Giriş Yap", use_container_width=True):
@@ -380,9 +386,7 @@ def auth_screen():
                     st.rerun()
                 else:
                     st.error("Kullanıcı adı veya şifre hatalı.")
-
-    with tab_kayit:
-        with col:
+        else:
             yeni_adi = st.text_input("Ad Soyad", key="reg_name")
             yeni_uname = st.text_input("Kullanıcı adı", key="reg_uname")
             yeni_pw = st.text_input("Şifre (en az 4 karakter)", type="password", key="reg_pw")
