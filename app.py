@@ -29,6 +29,10 @@ from data_store import (
     get_record,
     get_previous_record,
     save_record,
+    create_user,
+    verify_login,
+    get_user_by_id,
+    count_facilities,
 )
 
 # ==============================================
@@ -173,6 +177,7 @@ st.markdown(f"""
 # ==============================================
 def init_session():
     defaults = {
+        "user": None,
         "step": 0,
         "facility_id": None,
         "tesis": {},
@@ -260,6 +265,24 @@ def sidebar():
             init_session()
             st.rerun()
 
+        st.markdown('<div class="sb-label" style="margin-top:20px;">Oturum</div>', unsafe_allow_html=True)
+        if st.session_state.user:
+            u = st.session_state.user
+            st.markdown(
+                f'<div class="sb-card">'
+                f'<div class="sb-label">👤 Kullanıcı</div>'
+                f'<div class="sb-value">{u.get("fullname", u["username"])}</div>'
+                f'<div style="font-size:12px; color:#6b7a70;">@{u["username"]} · {count_facilities(u["id"])} otel</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("🚪 Çıkış Yap", use_container_width=True, type="secondary"):
+                for k in ["user", "step", "facility_id", "tesis", "tuketim", "sonuc", "history"]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                init_session()
+                st.rerun()
+
 
 # ==============================================
 # YARDIMCILAR
@@ -330,7 +353,54 @@ def _color_for_pct(pct):
 
 
 # ==============================================
-# ADIM 0 - TESİS SEÇİMİ
+# GİRİŞ / KAYIT
+# ==============================================
+def auth_screen():
+    st.markdown("""
+    <div class="hero">
+        <div class="logo">🌿</div>
+        <h1>KarbonAT P2</h1>
+        <p>GSTC / TGA uyumlu karbon ayak izi ve sürdürülebilirlik raporlaması</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col = st.columns([2, 3, 2])[1]
+
+    tab_giris, tab_kayit = st.tabs(["🔑 Giriş Yap", "✨ Yeni Hesap"])
+
+    with tab_giris:
+        with col:
+            username = st.text_input("Kullanıcı adı", key="auth_uname")
+            password = st.text_input("Şifre", type="password", key="auth_pw")
+            if st.button("Giriş Yap", use_container_width=True):
+                user = verify_login(username, password)
+                if user:
+                    st.session_state.user = user
+                    st.session_state.step = 0
+                    st.rerun()
+                else:
+                    st.error("Kullanıcı adı veya şifre hatalı.")
+
+    with tab_kayit:
+        with col:
+            yeni_adi = st.text_input("Ad Soyad", key="reg_name")
+            yeni_uname = st.text_input("Kullanıcı adı", key="reg_uname")
+            yeni_pw = st.text_input("Şifre (en az 4 karakter)", type="password", key="reg_pw")
+            if st.button("Hesap Oluştur", use_container_width=True):
+                if len(yeni_pw) < 4:
+                    st.error("Şifre en az 4 karakter olmalı.")
+                else:
+                    user = create_user(yeni_uname, yeni_pw, yeni_adi)
+                    if user:
+                        st.session_state.user = user
+                        st.session_state.step = 0
+                        st.rerun()
+                    else:
+                        st.error("Bu kullanıcı adı zaten alınmış.")
+
+
+# ==============================================
+# ADIM 0 - TESİS SEÇİMİ (PROFİLİM / OTELLERİM)
 # ==============================================
 def adim_tesis_secimi():
     st.markdown("""
@@ -341,14 +411,19 @@ def adim_tesis_secimi():
     </div>
     """, unsafe_allow_html=True)
 
-    facilities = list_facilities()
+    user = st.session_state.user
+    facilities = list_facilities(user["id"])
     col = st.columns([2, 3, 2])[1]
 
     if facilities:
         with col:
-            st.markdown('<div class="section-title">🏨 Tesisinizi Seçin</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="section-title">🏨 Profilim · Otellerim '
+                f'<span style="color:#6b7a70; font-weight:500;">({len(facilities)})</span></div>',
+                unsafe_allow_html=True,
+            )
             secenekler = {t["ad"]: t["id"] for t in facilities}
-            secim = st.selectbox("Kayıtlı tesisler", list(secenekler.keys()))
+            secim = st.selectbox("Tesisinizi seçin", list(secenekler.keys()))
             st.session_state.facility_id = secenekler[secim]
             st.session_state.tesis = get_facility(st.session_state.facility_id)
 
@@ -379,8 +454,12 @@ def adim_tesis_secimi():
                 st.rerun()
     else:
         with col:
-            st.markdown('<div class="section-title">Başlamak için tesis profilinizi oluşturun</div>',
-                        unsafe_allow_html=True)
+            st.markdown('<div class="section-title">Henüz oteliniz yok</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="banner">👋 Hoş geldiniz, <strong>{user.get("fullname", user["username"])}</strong>! '
+                f'İlk tesis profilinizi oluşturarak başlayın.</div>',
+                unsafe_allow_html=True,
+            )
             if st.button("▶ Tesis Oluştur", use_container_width=True):
                 st.session_state.step = 1
                 st.rerun()
@@ -444,7 +523,7 @@ def adim_tesis():
             }
             if st.session_state.facility_id:
                 tesis["id"] = st.session_state.facility_id
-            tesis = save_facility(tesis)
+            tesis = save_facility(tesis, owner_id=st.session_state.user["id"])
             st.session_state.tesis = tesis
             st.session_state.facility_id = tesis["id"]
             st.session_state.history = list_records(tesis["id"])
@@ -886,14 +965,17 @@ def adim_sonuc():
 # ==============================================
 # ROUTER
 # ==============================================
-sidebar()
+if st.session_state.user is None:
+    auth_screen()
+else:
+    sidebar()
 
-adimler = [
-    adim_tesis_secimi,
-    adim_tesis,
-    adim_veri,
-    adim_hesap,
-    adim_sonuc,
-]
+    adimler = [
+        adim_tesis_secimi,
+        adim_tesis,
+        adim_veri,
+        adim_hesap,
+        adim_sonuc,
+    ]
 
-adimler[st.session_state.step]()
+    adimler[st.session_state.step]()
