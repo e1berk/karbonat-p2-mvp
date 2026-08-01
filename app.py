@@ -21,6 +21,13 @@ from tga_tables import (
     tum_tablolar,
 )
 from green_report import save_green_report
+from icerik_hub import (
+    ICERIK_TURLERI,
+    ISKELETLER,
+    TEMALAR,
+    tercih_sorulari,
+    varsayilan_tercih,
+)
 from data_store import (
     list_facilities,
     get_facility,
@@ -33,6 +40,8 @@ from data_store import (
     verify_login,
     get_user_by_id,
     count_facilities,
+    get_content_prefs,
+    save_content_prefs,
 )
 
 # ==============================================
@@ -211,6 +220,7 @@ STEP_ISIMLERI = [
     ("📊", "Veri Girişi"),
     ("🧮", "Hesaplama"),
     ("📄", "Rapor"),
+    ("🌿", "İçerikler"),
 ]
 
 
@@ -441,7 +451,7 @@ def adim_tesis_secimi():
                 )
 
             st.markdown("")
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("📊 Veri Girişi", use_container_width=True):
                     st.session_state.history = list_records(st.session_state.facility_id)
@@ -450,6 +460,10 @@ def adim_tesis_secimi():
             with c2:
                 if st.button("✏️ Profili Düzenle", use_container_width=True, type="secondary"):
                     st.session_state.step = 1
+                    st.rerun()
+            with c3:
+                if st.button("🌿 İçerik Merkezi", use_container_width=True, type="secondary"):
+                    st.session_state.step = 5
                     st.rerun()
             if st.button("＋ Yeni Tesis Oluştur", use_container_width=True, type="secondary"):
                 st.session_state.tesis = {}
@@ -967,6 +981,130 @@ def adim_sonuc():
 
 
 # ==============================================
+# ADIM 5 - İÇERİK MERKEZİ (İSKELET v1)
+# ==============================================
+def _icerik_karti(fac_id, tur):
+    tur_id = tur["id"]
+    defaults = varsayilan_tercih(tur_id)
+    p = {**defaults, **(get_content_prefs(fac_id, tur_id) or {})}
+
+    st.markdown(
+        f'<div class="data-card" style="margin-top:10px;">'
+        f'<div style="display:flex; justify-content:space-between; align-items:center;">'
+        f'<div style="font-weight:800; font-size:16px;">{tur["emoji"]} {tur["baslik"]}</div>'
+        f'<span class="chip" style="margin:0;">🚧 Planlama</span>'
+        f'</div>'
+        f'<p style="color:#6b7a70; font-size:13.5px; margin-top:8px;">{tur["aciklama"]}</p>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("🗂️ Planlanan Yapı (iskelet)", expanded=False):
+        for i, baslik in enumerate(ISKELETLER[tur_id], 1):
+            st.markdown(f"**{i}.** {baslik}", unsafe_allow_html=True)
+        st.caption("Öneri taslaktır; araştırma tamamlandığında netleşir.")
+
+    st.markdown('<div class="section-title">🎨 Tasarım Tercihleri</div>', unsafe_allow_html=True)
+    for soru in tercih_sorulari(tur_id):
+        secenekler = soru["secenekler"]
+        idx = secenekler.index(p.get(soru["anahtar"])) if p.get(soru["anahtar"]) in secenekler else 0
+        p[soru["anahtar"]] = st.selectbox(
+            soru["soru"],
+            secenekler,
+            index=idx,
+            key=f"tp_{fac_id}_{tur_id}_{soru['anahtar']}",
+        )
+
+    tema_keys = list(TEMALAR.keys())
+    tema_adlar = [TEMALAR[k]["ad"] for k in tema_keys]
+    tema_sec = st.selectbox(
+        "Görsel Tema",
+        tema_adlar,
+        index=tema_keys.index(p["tema"]) if p["tema"] in tema_keys else 0,
+        key=f"tp_{fac_id}_{tur_id}_tema",
+        help="Üretim aşamasında rapor/broşür görsel paletine uygulanacak.",
+    )
+    p["tema"] = tema_keys[tema_adlar.index(tema_sec)]
+
+    p["notlar"] = st.text_area(
+        "✍️ AI'a tarzı / kapsamı anlat (isteğe bağlı)",
+        value=p.get("notlar", ""),
+        placeholder=("Örn: 'Sıcak ve samimi bir dille, sayılarla değil hikayelerle anlat. "
+                     "Yenilenebilir enerjiye geçişimizi öne çıkar.'"),
+        key=f"tp_{fac_id}_{tur_id}_notlar",
+    )
+
+    save_content_prefs(fac_id, tur_id, p)
+
+    st.markdown("---")
+    st.button(
+        "🚧 Üret / İndir — Araştırma Aşamasında",
+        disabled=True,
+        use_container_width=True,
+        key=f"uretim_{fac_id}_{tur_id}",
+        help=("İçerik şablonu hazır değil; araştırma tamamlanınca "
+              "(ileride AI destekli) buradan üretebileceksiniz."),
+    )
+    st.caption("Bu içerik türü şu an devre dışı. Tercihleriniz kaydedildi ve üretime hazır.")
+
+
+def adim_icerik():
+    tesis = st.session_state.tesis
+    if not tesis or not tesis.get("id"):
+        st.warning("Önce bir tesis seçin.")
+        return
+
+    st.markdown('<h1>🌿 İçerik Merkezi</h1>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="chip">🌿 {tesis["ad"]}</div>'
+        f'<div class="chip">🚧 Planlama Aşaması</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div class="banner">Buradan tüm sürdürülebilirlik içeriklerinizi tek panelden '
+        'yapılandırırsınız: rapor, web sayfası, broşür, QR kart, politika, anket ve eğitim '
+        'kayıtları. Şu anda <strong>planlama aşamasındayız</strong>: tasarım tercihlerinizi '
+        'seçip kaydediyoruz; içerik metinleri araştırma tamamlanınca (ileride AI destekli) '
+        'otomatik üretilecek.</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Türleri sekmelere grupla (anket -> alt sekmeler)
+    gruplar = []
+    for tur in ICERIK_TURLERI:
+        if tur.get("grup"):
+            mevcut = next((g for g in gruplar if g["id"] == tur["grup"]), None)
+            if mevcut:
+                mevcut["turler"].append(tur)
+            else:
+                gruplar.append({
+                    "id": tur["grup"], "emoji": tur["emoji"], "baslik": tur["baslik"],
+                    "turler": [tur],
+                })
+        else:
+            gruplar.append({
+                "id": tur["id"], "emoji": tur["emoji"], "baslik": tur["baslik"],
+                "turler": [tur],
+            })
+
+    tabs = st.tabs([f'{g["emoji"]} {g["baslik"]}' for g in gruplar])
+    for tab, g in zip(tabs, gruplar):
+        with tab:
+            if len(g["turler"]) == 1:
+                _icerik_karti(tesis["id"], g["turler"][0])
+            else:
+                alt_tabs = st.tabs([t["alt_baslik"] for t in g["turler"]])
+                for at, t in zip(alt_tabs, g["turler"]):
+                    with at:
+                        _icerik_karti(tesis["id"], t)
+
+    st.markdown("---")
+    if st.button("← Tesis Seçimine Dön", type="secondary"):
+        st.session_state.step = 0
+        st.rerun()
+
+
+# ==============================================
 # ROUTER
 # ==============================================
 if st.session_state.user is None:
@@ -980,6 +1118,7 @@ else:
         adim_veri,
         adim_hesap,
         adim_sonuc,
+        adim_icerik,
     ]
 
     adimler[st.session_state.step]()

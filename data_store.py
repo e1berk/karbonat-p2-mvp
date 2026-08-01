@@ -13,7 +13,7 @@ from datetime import datetime
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_FILE = os.path.join(DATA_DIR, "karbonat_db.json")
 
-DEFAULT_DB = {"kullanicilar": [], "tesisler": [], "kayitlar": {}}
+DEFAULT_DB = {"kullanicilar": [], "tesisler": [], "kayitlar": {}, "icerik_tercihleri": {}}
 
 _SALT = "karbonat_p2_salt"
 
@@ -140,6 +140,7 @@ def delete_facility(fac_id):
     db = _db()
     db["tesisler"] = [t for t in db.get("tesisler", []) if t["id"] != fac_id]
     db.get("kayitlar", {}).pop(fac_id, None)
+    db.get("icerik_tercihleri", {}).pop(fac_id, None)
     _save(db)
 
 
@@ -191,3 +192,22 @@ def delete_record(fac_id, period):
     kayitlar = db.get("kayitlar", {}).get(fac_id, [])
     db["kayitlar"][fac_id] = [r for r in kayitlar if r.get("period") != period]
     _save(db)
+
+
+# ---------------- İÇERİK TERCİHLERİ ----------------
+
+def get_content_prefs(fac_id, tur_id):
+    """Tesis + içerik türü için kayıtlı tercihleri döner (yoksa None)."""
+    db = _db()
+    return db.get("icerik_tercihleri", {}).get(fac_id, {}).get(tur_id)
+
+
+def save_content_prefs(fac_id, tur_id, prefs):
+    """İçerik türü tercihlerini kaydeder/üzerine yazar."""
+    db = _db()
+    d = db.setdefault("icerik_tercihleri", {}).setdefault(fac_id, {})
+    p = dict(prefs)
+    p["updated"] = datetime.now().isoformat(timespec="seconds")
+    d[tur_id] = p
+    _save(db)
+    return p
