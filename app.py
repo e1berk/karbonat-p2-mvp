@@ -1328,44 +1328,75 @@ def _icerik_detay(fac_id, tur):
 
     if tasarim_var:
         t_duzen = tasarim.TASARIMLAR[tur_id]
-        st.markdown("### 🎨 Tasarımlı Çıktı")
+        st.markdown("### 🎨 Görsel Çıktı")
         if not sonuc:
             st.caption("Not: Hesaplama verilmediği için sayı kartları boş görünür; önce adım 4'te hesaplama yapın.")
         html = getattr(tasarim, t_duzen["html"])(sonuc, icerik)
-        with st.expander("Canlı önizleme", expanded=True):
-            components.html(html, height=660, scrolling=True)
+        if "png" in t_duzen:
+            png = getattr(tasarim, t_duzen["png"])(sonuc, icerik, tur_id)
+            st.image(png, use_container_width=True)
+            with st.expander("Ayrıca web / HTML görünümü", expanded=False):
+                components.html(html, height=520, scrolling=True)
+        else:
+            with st.expander("Canlı önizleme", expanded=True):
+                components.html(html, height=660, scrolling=True)
 
         with st.expander("✏️ Ham içeriği düzenle (markdown)", expanded=False):
             st.text_area("İçerik", value=icerik, height=380, key=mte_key)
-            st.caption("Başlık: `### Başlık`  ·  Madde: `- metin`. Düzenleme PDF/HTML'e yansır.")
+            st.caption("Başlık: `### Başlık`  ·  Madde: `- metin`. Düzenleme görsele/PDF/HTML'e yansır.")
         icerik = st.session_state.get(mte_key) or kayit["metin"]
 
         st.markdown("---")
-        d1, d2, d3, d4 = st.columns(4)
-        with d1:
+        n_buton = 5 if "png" in t_duzen else 4
+        cols = st.columns(n_buton)
+        with cols[0]:
             try:
                 st.download_button("🖼️ PDF", data=getattr(tasarim, tasarim.TASARIMLAR[tur_id]["pdf"])(sonuc, icerik),
                                    file_name=f"KarbonAT_{tur_id}_{fac_id}.pdf", mime="application/pdf",
                                    key=f"mpdf_{fac_id}_{tur_id}", use_container_width=True)
             except Exception as e:  # noqa: BLE001
                 st.warning(f"PDF: {e}")
-        with d2:
-            st.download_button("🌐 HTML", data=html.encode("utf-8"),
-                               file_name=f"KarbonAT_{tur_id}_{fac_id}.html", mime="text/html",
-                               key=f"mthtml_{fac_id}_{tur_id}", use_container_width=True)
-        with d3:
-            try:
-                st.download_button("📄 Word", data=raporlar.rapor_docx(icerik),
-                                   file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
-                                   mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                   key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
-            except Exception as e:  # noqa: BLE001
-                st.warning(f"Word: {e}")
-        with d4:
-            if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
-                save_media(fac_id, tur_id, icerik)
-                st.toast("Düzenleme kaydedildi.")
-                st.rerun()
+        if "png" in t_duzen:
+            with cols[1]:
+                st.download_button("🏞️ PNG", data=png,
+                                   file_name=f"KarbonAT_{tur_id}_{fac_id}.png",
+                                   mime="image/png",
+                                   key=f"mpng_{fac_id}_{tur_id}", use_container_width=True)
+            with cols[2]:
+                st.download_button("🌐 HTML", data=html.encode("utf-8"),
+                                   file_name=f"KarbonAT_{tur_id}_{fac_id}.html", mime="text/html",
+                                   key=f"mthtml_{fac_id}_{tur_id}", use_container_width=True)
+            with cols[3]:
+                try:
+                    st.download_button("📄 Word", data=raporlar.rapor_docx(icerik),
+                                       file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
+                                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                       key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+                except Exception as e:  # noqa: BLE001
+                    st.warning(f"Word: {e}")
+            with cols[4]:
+                if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+                    save_media(fac_id, tur_id, icerik)
+                    st.toast("Düzenleme kaydedildi.")
+                    st.rerun()
+        else:
+            with cols[1]:
+                st.download_button("🌐 HTML", data=html.encode("utf-8"),
+                                   file_name=f"KarbonAT_{tur_id}_{fac_id}.html", mime="text/html",
+                                   key=f"mthtml_{fac_id}_{tur_id}", use_container_width=True)
+            with cols[2]:
+                try:
+                    st.download_button("📄 Word", data=raporlar.rapor_docx(icerik),
+                                       file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
+                                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                       key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+                except Exception as e:  # noqa: BLE001
+                    st.warning(f"Word: {e}")
+            with cols[3]:
+                if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+                    save_media(fac_id, tur_id, icerik)
+                    st.toast("Düzenleme kaydedildi.")
+                    st.rerun()
         return
 
     icerik = st.text_area(

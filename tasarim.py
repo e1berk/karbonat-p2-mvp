@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import html as _html
+import os
 from io import BytesIO
 
 from raporlar import markdown_bloklar, _pdf_font_ayar
@@ -22,14 +23,14 @@ MUTED = "#54635a"
 
 BROŞÜR_TARİH = "06.08.2026"
 
-# Tür -> tasarımlı üretim fonksiyonları (html: önizleme, pdf: indirme)
+# Tür -> tasarımlı üretim fonksiyonları (html: önizleme, pdf: indirme, png: gerçek görsel)
 TASARIMLAR = {
-    "brosur": {"html": "brosur_html", "pdf": "brosur_pdf"},
-    "web": {"html": "brosur_html", "pdf": "brosur_pdf"},
-    "qr": {"html": "qr_html", "pdf": "qr_pdf"},
-    "basin_bulteni": {"html": "basin_html", "pdf": "basin_pdf"},
-    "sosyal_medya": {"html": "sosyal_html", "pdf": "sosyal_pdf"},
-    "gorsel_afis": {"html": "afis_html", "pdf": "afis_pdf"},
+    "brosur": {"html": "brosur_html", "pdf": "brosur_pdf", "png": "gorsel_png"},
+    "web": {"html": "brosur_html", "pdf": "brosur_pdf", "png": "gorsel_png"},
+    "qr": {"html": "qr_html", "pdf": "qr_pdf", "png": "gorsel_png"},
+    "basin_bulteni": {"html": "basin_html", "pdf": "basin_pdf", "png": "gorsel_png"},
+    "sosyal_medya": {"html": "sosyal_html", "pdf": "sosyal_pdf", "png": "gorsel_png"},
+    "gorsel_afis": {"html": "afis_html", "pdf": "afis_pdf", "png": "gorsel_png"},
 }
 
 
@@ -652,3 +653,152 @@ def sosyal_pdf(son, metin: str) -> bytes:
             akis.append(Paragraph("• " + icerik, stiller))
     doc.build(akis)
     return buffer.getvalue()
+
+
+# ============================================================
+# GERÇEK GÖRSEL (raster PNG) — Pillow ile infografik
+# ============================================================
+
+_FONT_YOLLARI = {
+    "r": r"C:\Windows\Fonts\arial.ttf",
+    "b": r"C:\Windows\Fonts\arialbd.ttf",
+    "d": r"C:\Windows\Fonts\dejavusans.ttf",
+    "db": r"C:\Windows\Fonts\dejavusans-bold.ttf",
+}
+
+
+def _img_font(bold: bool, size: int):
+    from PIL import ImageFont
+    anahtar = "b" if bold else "r"
+    yol = _FONT_YOLLARI[anahtar]
+    if not os.path.exists(yol):
+        yol = (_FONT_YOLLARI["db"] if bold else _FONT_YOLLARI["d"])
+    if not os.path.exists(yol):
+        return ImageFont.load_default()
+    _img_font.__cache = _img_font.__cache if hasattr(_img_font, "__cache") else {}
+    if (anahtar, size) not in _img_font.__cache:
+        _img_font.__cache[(anahtar, size)] = ImageFont.truetype(yol, size)
+    return _img_font.__cache[(anahtar, size)]
+
+
+def _satir_parcala(draw, metin, font, max_w):
+    """Metni satır genişliğine göre kırar."""
+    satirlar = []
+    for parca in metin.split("\n"):
+        if not parca:
+            continue
+        if draw.textlength(parca, font=font) <= max_w:
+            satirlar.append(parca)
+            continue
+        satir = ""
+        for kelime in parca.split(" "):
+            deneme = (satir + " " + kelime).strip()
+            if draw.textlength(deneme, font=font) <= max_w:
+                satir = deneme
+            else:
+                if satir:
+                    satirlar.append(satir)
+                satir = kelime
+        if satir:
+            satirlar.append(satir)
+    return satirlar
+
+
+def gorsel_png(son, metin: str, tur_id: str | None = None) -> bytes:
+    """Markalı, gerçek bir raster görsel (PNG) üretir — Pillow infografik."""
+    from PIL import Image, ImageDraw
+
+    tesis = tesis_adi(son)
+    kl = kpi_listesi(son)
+    W, H = 1000, 1420
+    sol = 70
+    sag = W - 70
+    ic_gen = sag - sol
+
+    img = Image.new("RGB", (W, H), "#ffffff")
+    dr = ImageDraw.Draw(img)
+
+    P = (29, 107, 69)      # #1d6b45
+    D = (12, 61, 39)       # #0c3d27
+    A = (217, 153, 61)     # #d99a3d
+    LG = (238, 244, 238)   # #eef4ee
+    BRD = (217, 224, 217)  # #d9e0d9
+    MT = (84, 99, 90)      # #54635a
+    TX = (44, 54, 47)      # #2c362f
+
+    f_buyuk = _img_font(True, 64)
+    f_orta = _img_font(True, 40)
+    f_alt = _img_font(False, 28)
+    f_bas = _img_font(True, 34)
+    f_madde = _img_font(False, 27)
+    f_kart_v = _img_font(True, 58)
+    f_kart_e = _img_font(False, 22)
+
+    # --- Üst bant (dikey gradyan) ---
+    bant_y = 150
+    for i in range(bant_y):
+        t = i / bant_y
+        renk = tuple(round(D[c] + (P[c] - D[c]) * t) for c in range(3))
+        dr.rectangle([0, i, W, i + 1], fill=renk)
+    dr.text((sol, 26), "GSTC · TGA SÜRDÜRÜLEBİLİR KONAKLAMA", font=f_alt,
+            fill=(185, 214, 196))
+    dr.text((sol, 58), tesis, font=f_buyuk, fill=(255, 255, 255))
+    dr.text((sol, 118), "Doğayla uyumlu, doğrulanmış sürdürülebilirlik", font=f_alt,
+            fill=(201, 227, 210))
+
+    # --- KPI kartları ---
+    y = bant_y + 34
+    kart_gen = (ic_gen - 3 * 14) / 4
+    for i, (label, v, birim) in enumerate(kl):
+        x0 = sol + i * (kart_gen + 14)
+        dr.rounded_rectangle([x0, y, x0 + kart_gen, y + 110], radius=14, fill="#ffffff",
+                             outline=BRD, width=2)
+        dr.text((x0 + 14, y + 16), v, font=f_kart_v, fill=P)
+        et = f"{label}"
+        dr.text((x0 + 14, y + 82), et, font=f_kart_e, fill=MT)
+    y += 110 + 20
+
+    # --- İçerik bölümleri ---
+    bolumler = _md_bolumler(metin)
+
+    # Bölüm başına madde kotası (takılı kalan uzun içerik için kompakt)
+    M = 6
+    for baslik, satirlar in bolumler:
+        maddeler = [ic for t_, ic in satirlar if t_ == "md"][: M]
+        blok_h = 40 + (len(baslik) > 0) * 8 + len(maddeler) * 34
+        if y + blok_h > H - 150:
+            break
+        if baslik:
+            dr.rectangle([sol, y + 4, sol + 7, y + 38], fill=A)
+            dr.text((sol + 20, y), baslik, font=f_bas, fill=D)
+            y += 46
+        for madde in maddeler:
+            for satir in _satir_parcala(dr, madde, f_madde, ic_gen - 40):
+                dr.text((sol + 30, y), "▪", font=f_madde, fill=A)
+                dr.text((sol + 52, y), satir, font=f_madde, fill=TX)
+                y += 34
+        y += 12
+
+    # --- Alt bölüm: QR + rozet ---
+    y = H - 130
+    dr.rectangle([sol, y, sag, y + 70], fill=LG)
+    # sahte QR deseni (find tuple)
+    import random as _rnd
+    _rnd.seed(42)
+    qsat = 6
+    qx, qy = sol + 24, y + 16
+    kare = 42 / qsat
+    for qi in range(qsat):
+        for qj in range(qsat):
+            if _rnd.random() < 0.5:
+                dr.rectangle([qx + qi * kare, qy + qj * kare,
+                              qx + (qi + 1) * kare, qy + (qj + 1) * kare], fill=D)
+    dr.text((sol + 120, y + 20), "TGA / GSTC DOĞRULANMIŞ VERİ", font=f_alt, fill=P)
+    dr.text((sol + 120, y + 46), "QR kodu taratarak inceleyin", font=f_madde, fill=MT)
+    dr.rectangle([sol, H - 26, sag, H], fill=D)
+    dr.text((sol, H - 24), f"{BROŞÜR_TARİH} · KarbonAT — Sürdürülebilirlik Altyapısı",
+            font=f_alt, fill=(205, 227, 210))
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
