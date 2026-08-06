@@ -160,15 +160,34 @@ def _rag_filtreli(soru: str, terimler: list[str], k: int = 4) -> list[dict]:
     return (alt or sonuclar)[:k]
 
 
+def _retry_bekle(e: Exception) -> float:
+    """429 yanıtındaki istediği 'retryDelay' süresini saniye olarak ayıkla.
+
+    Gemini hata detayında `'retryDelay': '16s'` tarzı JSON/string bulunur.
+    Bulunamazsa varsayılan 2 sn döner.
+    """
+    import re
+
+    m = re.search(r"""retry[_-]?delay['"]?\s*[:=]\s*['"]?(\d+)""", str(e), re.I)
+    if not m:
+        return 2
+    saniye = int(m.group(1))
+    return max(2, min(saniye, 60))
+
+
 def _gemini_cagir(prompt: str) -> str:
     """Model fallback'li Gemini çağrısı — markdown döner.
 
-    Ücretsiz katmanda 429 (kota) sık olduğundan tur 2 kez denenir;
-    aradaki beklemeler kotaların açılmasına zaman tanır.
+    Ücretsiz katmanda 429 (kota) sık olduğundan, her hata sonrası API'nin
+    istediği 'retryDelay' kadar beklenir ve tüm liste tekrar denenir. Toplam
+    beklemeye bir tavan konur; hâlâ kota kapalıysa açık teşhisli RuntimeError
+    fırlatılır.
     """
     c = _client()
     hata = None
-    for deneme in range(2):
+    beklenen = 0
+    MAX_BEKLE = 90  # saniye
+    while beklenen < MAX_BEKLE:
         for model in GEN_MODELS:
             try:
                 r = c.models.generate_content(
@@ -182,10 +201,18 @@ def _gemini_cagir(prompt: str) -> str:
                 return metin
             except Exception as e:  # noqa: BLE001 — model fallback
                 hata = e
-                print(f"  ! {model} başarısız: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
-                time.sleep(2)
-        time.sleep(3)
-    raise RuntimeError(f"Tüm üretim modelleri başarısız. Son hata: {hata}")
+                gec = _retry_bekle(e)
+                beklenen += gec
+                print(
+                    f"  ! {model} başarısız ({type(e).__name__}); {gec}sn bekle",
+                    file=sys.stderr,
+                )
+                if beklenen >= MAX_BEKLE:
+                    break
+                time.sleep(gec)
+        if beklenen >= MAX_BEKLE:
+            break
+    raise RuntimeError(f"Tüm üretim modelleri başarısız (kota 90sn aşıldı). Son hata: {hata}")
 
 
 # ---------------- Üretim ----------------

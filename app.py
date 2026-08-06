@@ -888,7 +888,16 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
             st.rerun()
         except Exception as e:  # noqa: BLE001
             st.error(f"Üretim başarısız: {e}")
-            st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
+            sy = str(e)
+            if "429" in sy or "RESOURCE_EXHAUSTED" in sy or "quota" in sy.lower():
+                st.warning(
+                    "Kota (429) aşıldı — ücretsiz katmanın günlük/dakikalık limiti "
+                    "tükendi. Dakika kotası birkaç saniyede açılır; üst üste deneme "
+                    "engellemeyi uzatır. Kalıcı çözüm: GEMINI_API_KEY'i ücretli bir "
+                    "anahtarla değiştirin. https://ai.google.dev/gemini-api/docs/rate-limits"
+                )
+            else:
+                st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kota yoksa birkaç saniye sonra tekrar deneyin.")
 
     if not kayit:
         st.info("Henüz üretilmedi — yukarıdaki düğmeyle üretin; içerik düzenlenebilir ve PDF/Word/Excel indirilebilir.")
@@ -1314,7 +1323,16 @@ def _icerik_detay(fac_id, tur):
             st.rerun()
         except Exception as e:  # noqa: BLE001
             st.error(f"Üretim başarısız: {e}")
-            st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
+            sy = str(e)
+            if "429" in sy or "RESOURCE_EXHAUSTED" in sy or "quota" in sy.lower():
+                st.warning(
+                    "Kota (429) aşıldı — ücretsiz katmanın günlük/dakikalık limiti "
+                    "tükendi. Dakika kotası birkaç saniyede açılır; üst üste deneme "
+                    "engellemeyi uzatır. Kalıcı çözüm: GEMINI_API_KEY'i ücretli bir "
+                    "anahtarla değiştirin. https://ai.google.dev/gemini-api/docs/rate-limits"
+                )
+            else:
+                st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kota yoksa birkaç saniye sonra tekrar deneyin.")
 
     kayit = get_media(fac_id, tur_id)
     if not kayit:
