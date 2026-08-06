@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -29,13 +30,15 @@ from icerik_hub import ISKELETLER, tur_bul, TURE_OZEL_SORULAR  # noqa: E402
 CAKTI_YOL = Path(__file__).parent / "data" / "kb.json"
 EMBED_MODEL = "gemini-embedding-001"
 
-# Sırayla denenir: ilk çalışan kullanılır (429 kota / 404 erişim hatasında geç)
+# Sırayla denenir: ilk çalışan kullanılır (429 kota / 404 erişim hatasında geç).
+# Not: "gemini-2.5-flash" genel takma adı yeni kullanıcılara kapalıdır (404),
+# bu yüzden liste sürümlü/kararlı adlardan oluşur.
 GEN_MODELS = [
     os.environ.get("GEMINI_MODEL", ""),
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
     "gemini-flash-latest",
-    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite-001",
+    "gemini-2.5-pro",
 ]
 GEN_MODELS = [m for m in GEN_MODELS if m]
 
@@ -158,23 +161,30 @@ def _rag_filtreli(soru: str, terimler: list[str], k: int = 4) -> list[dict]:
 
 
 def _gemini_cagir(prompt: str) -> str:
-    """Model fallback'li Gemini çağrısı — markdown döner."""
+    """Model fallback'li Gemini çağrısı — markdown döner.
+
+    Ücretsiz katmanda 429 (kota) sık olduğundan tur 2 kez denenir;
+    aradaki beklemeler kotaların açılmasına zaman tanır.
+    """
     c = _client()
     hata = None
-    for model in GEN_MODELS:
-        try:
-            r = c.models.generate_content(
-                model=model,
-                contents=prompt,
-                config={"response_mime_type": "text/plain"},
-            )
-            metin = (r.text or "").strip()
-            if not metin:
-                raise RuntimeError("Boş yanıt")
-            return metin
-        except Exception as e:  # noqa: BLE001 — model fallback
-            hata = e
-            print(f"  ! {model} başarısız: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+    for deneme in range(2):
+        for model in GEN_MODELS:
+            try:
+                r = c.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config={"response_mime_type": "text/plain"},
+                )
+                metin = (r.text or "").strip()
+                if not metin:
+                    raise RuntimeError("Boş yanıt")
+                return metin
+            except Exception as e:  # noqa: BLE001 — model fallback
+                hata = e
+                print(f"  ! {model} başarısız: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+                time.sleep(2)
+        time.sleep(3)
     raise RuntimeError(f"Tüm üretim modelleri başarısız. Son hata: {hata}")
 
 
