@@ -247,3 +247,24 @@ def get_saved_reports(fac_id, period):
     """Belirli dönemdeki tüm kayıtlı raporları döner."""
     db = _db()
     return db.get("raporlar", {}).get(fac_id, {}).get(period, {})
+
+
+# ---------------- MEDYA (tesis bazlı, tür başına kayıt) ----------------
+
+def get_media(fac_id, tur_id):
+    """Belirli tür için kayıtlı medya içeriğini döner (yoksa None)."""
+    db = _db()
+    return db.get("medya", {}).get(fac_id, {}).get(tur_id)
+
+
+def save_media(fac_id, tur_id, metin):
+    """Üretilen/düzenlenen medya içeriğini kaydeder (varsa üzerine yazar)."""
+    db = _db()
+    kayit = {
+        "tur_id": tur_id,
+        "metin": metin,
+        "created": datetime.now().isoformat(timespec="seconds"),
+    }
+    db.setdefault("medya", {}).setdefault(fac_id, {})[tur_id] = kayit
+    _save(db)
+    return kayit

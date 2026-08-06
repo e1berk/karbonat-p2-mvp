@@ -30,6 +30,8 @@ from icerik_hub import (
     varsayilan_tercih,
 )
 import ai_engine
+import tasarim
+import streamlit.components.v1 as components
 from data_store import (
     list_facilities,
     get_facility,
@@ -46,6 +48,8 @@ from data_store import (
     save_content_prefs,
     get_report,
     save_report,
+    get_media,
+    save_media,
 )
 import raporlar
 
@@ -849,6 +853,107 @@ def adim_hesap():
 # ==============================================
 # RAPORLAR (raporlama alt sistemi) — sonuç + profil'de paylaşılır
 # ==============================================
+def _markdown_blok(metin):
+    """Markdown'ı gösterir; tabloları kaydırmalı DataFrame olarak basar (taşma olmaz)."""
+    for tur, icerik in raporlar.markdown_bloklar(metin):
+        if tur == "tablo":
+            st.dataframe(icerik, use_container_width=True, hide_index=True)
+        elif icerik and icerik.strip():
+            st.markdown(icerik)
+
+
+def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
+    sab_id = sab["id"]
+    rte_key = f"rte_{fac_id}_{period}_{sab_id}"
+    mod_key = f"rmod_{fac_id}_{period}_{sab_id}"
+
+    h1, h2 = st.columns([6, 1])
+    with h1:
+        st.markdown(f"### {sab['emoji']} {sab['baslik']}")
+    with h2:
+        if st.button("✖ Kapat", key=f"rkapat_{fac_id}_{period}_{sab_id}"):
+            st.session_state.pop(f"rapor_detay_{fac_id}_{period}", None)
+            st.rerun()
+    st.caption(sab["aciklama"])
+
+    kayit = get_report(fac_id, period, sab_id)
+
+    if st.button("🚀 Üret / Yenile", key=f"rug_{fac_id}_{period}_{sab_id}", use_container_width=True):
+        try:
+            with st.spinner("Şablon tesis verilerinizle dolduruluyor..."):
+                cik = raporlar.rapor_uretim(sab_id, tesis, sonuc, prefs)
+            save_report(fac_id, period, sab_id, cik["metin"], tip=cik["tip"])
+            st.session_state.pop(rte_key, None)
+            st.toast("Rapor kaydedildi; profilinizde aylara göre görebilirsiniz.")
+            st.rerun()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Üretim başarısız: {e}")
+            st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
+
+    if not kayit:
+        st.info("Henüz üretilmedi — yukarıdaki düğmeyle üretin; içerik düzenlenebilir ve PDF/Word/Excel indirilebilir.")
+        return
+
+    icerik = st.session_state.get(rte_key) or kayit["metin"]
+
+    st.markdown("### ✍️ İçerik")
+    mod = st.segmented_control(
+        "Görünüm",
+        options=["✏️ Düzenle", "👁 Önizleme"],
+        default="✏️ Düzenle",
+        key=mod_key,
+        label_visibility="collapsed",
+    )
+
+    if mod == "✏️ Düzenle":
+        icerik = st.text_area(
+            "Rapor içeriği — markdown yazabilirsiniz",
+            value=icerik,
+            height=520,
+            key=rte_key,
+        )
+        st.caption("Başlık: `### Başlık`  ·  Madde: `- metin`  ·  Tablo: `| Sütun | Değer |` satırları.")
+    else:
+        st.markdown("---")
+        _markdown_blok(icerik)
+        st.caption("Tablolar kaydırmalı tablo olarak gösterilir; PDF/Word/Excel gerçek tablo içerir.")
+
+    st.markdown("---")
+    d1, d2, d3, d4 = st.columns(4)
+    with d1:
+        try:
+            st.download_button("⬇️ PDF", data=raporlar.rapor_pdf(icerik),
+                               file_name=f"KarbonAT_{sab_id}_{period}.pdf", mime="application/pdf",
+                               key=f"rapdf_{fac_id}_{period}_{sab_id}", use_container_width=True)
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"PDF: {e}")
+    with d2:
+        try:
+            st.download_button("📄 Word (.docx)", data=raporlar.rapor_docx(icerik),
+                               file_name=f"KarbonAT_{sab_id}_{period}.docx",
+                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               key=f"radoc_{fac_id}_{period}_{sab_id}", use_container_width=True)
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"Word: {e}")
+    with d3:
+        try:
+            if sab["tip"] == "deterministik":
+                xlsx = raporlar.rapor_uretim(sab_id, tesis, sonuc)["xlsx"]
+            else:
+                xlsx = raporlar.rapor_xlsx(icerik)
+            st.download_button("📊 Excel", data=xlsx,
+                               file_name=f"KarbonAT_{sab_id}_{period}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               key=f"raex_{fac_id}_{period}_{sab_id}", use_container_width=True)
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"Excel: {e}")
+    with d4:
+        if st.button("💾 Düzenlemeyi Kaydet", key=f"rasv_{fac_id}_{period}_{sab_id}", use_container_width=True):
+            save_report(fac_id, period, sab_id, icerik, tip=kayit.get("tip", "ai"))
+            st.toast("Düzenleme kaydedildi.")
+            st.rerun()
+
+
 def _rapor_karti(fac_id, period, sonuc):
     if not sonuc:
         st.info("Önce hesaplama yapın; raporlar veriyle dolar.")
@@ -856,57 +961,31 @@ def _rapor_karti(fac_id, period, sonuc):
     tesis = sonuc.get("tesis") or {}
     st.markdown('<div class="section-title">📊 Raporlar</div>', unsafe_allow_html=True)
     st.caption(
-        "Referans TGA şablonlarının her biri tesis verilerinizle AYRI AYRI üretilir. "
+        "Aşağıdan bir şablon seçin → üretin → düzenleyin → PDF/Word/Excel indirin. "
         "Ürettikleriniz profilinizde (Raporlar → aylar) saklanır."
     )
     prefs = {"amac": "Raporlama", "ton": "Kurumsal & Resmi", "dil": "Türkçe", "uzunluk": "Detaylı"}
-    for sab in raporlar.RAPOR_SABLONLARI:
+    secim_key = f"rapor_detay_{fac_id}_{period}"
+
+    SUTUN = 3
+    cols = st.columns(SUTUN)
+    for i, sab in enumerate(raporlar.RAPOR_SABLONLARI):
         sab_id = sab["id"]
-        cikti = "".join(f'<span class="chip" style="font-size:11px;">🖨️ {c}</span>' for c in sab["cikti"])
         kayit = get_report(fac_id, period, sab_id)
         durum = "✅ Kayıtlı" if kayit else "⏳ Beklemede"
-        with st.expander(f"{sab['emoji']} {sab['baslik']}  ·  {durum}  {cikti}", expanded=bool(kayit)):
-            st.caption(sab["aciklama"])
-            if st.button("🚀 Üret / Yenile", key=f"rup_{fac_id}_{period}_{sab_id}"):
-                try:
-                    with st.spinner("Şablon tesis verilerinizle dolduruluyor..."):
-                        cik = raporlar.rapor_uretim(sab_id, tesis, sonuc, prefs)
-                    save_report(fac_id, period, sab_id, cik["metin"], tip=cik["tip"])
-                    st.toast("Rapor kaydedildi; profilinizde 🔎 aylara göre görebilirsiniz.")
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Üretim başarısız: {e}")
-                    st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
-            kayit = get_report(fac_id, period, sab_id)
-            if kayit:
-                st.markdown(kayit["metin"])
-                c1, c2 = st.columns(2)
-                with c1:
-                    try:
-                        st.download_button(
-                            "⬇️ PDF",
-                            data=raporlar.rapor_pdf(kayit["metin"]),
-                            file_name=f"KarbonAT_{sab_id}_{period}.pdf",
-                            mime="application/pdf",
-                            key=f"rapdf_{fac_id}_{period}_{sab_id}",
-                            use_container_width=True,
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        st.warning(f"PDF: {e}")
-                if sab["tip"] == "deterministik":
-                    with c2:
-                        try:
-                            xlsx = raporlar.rapor_uretim(sab_id, tesis, sonuc)["xlsx"]
-                            st.download_button(
-                                "📊 Excel",
-                                data=xlsx,
-                                file_name=f"KarbonAT_{sab_id}_{period}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"rapl_{fac_id}_{period}_{sab_id}",
-                                use_container_width=True,
-                            )
-                        except Exception as e:  # noqa: BLE001
-                            st.warning(f"Excel: {e}")
+        with cols[i % SUTUN]:
+            if st.button(f"{sab['emoji']} {sab['baslik']}", key=f"rcd_{fac_id}_{period}_{sab_id}",
+                         use_container_width=True):
+                st.session_state[secim_key] = sab_id
+                st.rerun()
+            st.caption(f"{durum} · {' · '.join(sab['cikti'])}")
+
+    secilen = st.session_state.get(secim_key)
+    if secilen:
+        sab = raporlar.sablon_bul(secilen)
+        if sab:
+            st.markdown("---")
+            _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs)
 
 
 # ==============================================
@@ -1163,30 +1242,24 @@ def adim_sonuc():
 # ==============================================
 # ADIM 5 - İÇERİK MERKEZİ (CONTENT ENGINE v2)
 # ==============================================
-def _icerik_karti(fac_id, tur):
+def _icerik_detay(fac_id, tur):
     tur_id = tur["id"]
     defaults = varsayilan_tercih(tur_id)
     p = {**defaults, **(get_content_prefs(fac_id, tur_id) or {})}
 
-    cikti_chips = "".join(
-        f'<span class="chip" style="font-size:11px;">🖨️ {c}</span>' for c in tur.get("ciktilar", [])
-    )
-    st.markdown(
-        f'<div class="data-card" style="margin-top:10px;">'
-        f'<div style="display:flex; justify-content:space-between; align-items:center;">'
-        f'<div style="font-weight:800; font-size:16px;">{tur["emoji"]} {tur["baslik"]}</div>'
-        f'<span class="chip" style="margin:0;">🚧 Planlama</span>'
-        f'</div>'
-        f'<p style="color:#6b7a70; font-size:13.5px; margin-top:8px;">{tur["aciklama"]}</p>'
-        f'<div style="margin-top:6px;">{cikti_chips}</div>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
+    h1, h2 = st.columns([6, 1])
+    with h1:
+        st.markdown(f"### {tur['emoji']} {tur['baslik']}")
+    with h2:
+        grup = tur.get("grup", "")
+        if st.button("✖ Kapat", key=f"mkapat_{fac_id}_{grup}"):
+            st.session_state.pop(f"medya_detay_{fac_id}_{grup}", None)
+            st.rerun()
+    st.caption(tur["aciklama"])
 
     with st.expander("🗂️ Planlanan Yapı (iskelet)", expanded=False):
         for i, baslik in enumerate(ISKELETLER[tur_id], 1):
             st.markdown(f"**{i}.** {baslik}", unsafe_allow_html=True)
-        st.caption("Öneri taslaktır; araştırma tamamlandığında netleşir.")
 
     st.markdown('<div class="section-title">🎨 Tasarım Tercihleri</div>', unsafe_allow_html=True)
     for soru in tercih_sorulari(tur_id):
@@ -1235,10 +1308,118 @@ def _icerik_karti(fac_id, tur):
         try:
             with st.spinner("AI içeriği üretiliyor..."):
                 markdown = ai_engine.uretim_olustur(tur_id, tesis or {}, sonuc, p)
-            st.markdown(markdown)
+            save_media(fac_id, tur_id, markdown)
+            st.session_state.pop(f"mte_{fac_id}_{tur_id}", None)
+            st.toast("İçerik kaydedildi; düzenleyip PDF/Word indirebilirsin.")
+            st.rerun()
         except Exception as e:  # noqa: BLE001
             st.error(f"Üretim başarısız: {e}")
             st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
+
+    kayit = get_media(fac_id, tur_id)
+    if not kayit:
+        st.info("Henüz üretilmedi — yukarıdaki düğmeyle üretin; içerik düzenlenebilir ve PDF/Word indirilebilir.")
+        return
+
+    mte_key = f"mte_{fac_id}_{tur_id}"
+    icerik = st.session_state.get(mte_key) or kayit["metin"]
+    sonuc = st.session_state.sonuc
+    tasarim_var = tur_id in tasarim.TASARIMLAR
+
+    if tasarim_var:
+        t_duzen = tasarim.TASARIMLAR[tur_id]
+        st.markdown("### 🎨 Tasarımlı Çıktı")
+        if not sonuc:
+            st.caption("Not: Hesaplama verilmediği için sayı kartları boş görünür; önce adım 4'te hesaplama yapın.")
+        html = getattr(tasarim, t_duzen["html"])(sonuc, icerik)
+        with st.expander("Canlı önizleme", expanded=True):
+            components.html(html, height=660, scrolling=True)
+
+        with st.expander("✏️ Ham içeriği düzenle (markdown)", expanded=False):
+            st.text_area("İçerik", value=icerik, height=380, key=mte_key)
+            st.caption("Başlık: `### Başlık`  ·  Madde: `- metin`. Düzenleme PDF/HTML'e yansır.")
+        icerik = st.session_state.get(mte_key) or kayit["metin"]
+
+        st.markdown("---")
+        d1, d2, d3, d4 = st.columns(4)
+        with d1:
+            try:
+                st.download_button("🖼️ PDF", data=getattr(tasarim, tasarim.TASARIMLAR[tur_id]["pdf"])(sonuc, icerik),
+                                   file_name=f"KarbonAT_{tur_id}_{fac_id}.pdf", mime="application/pdf",
+                                   key=f"mpdf_{fac_id}_{tur_id}", use_container_width=True)
+            except Exception as e:  # noqa: BLE001
+                st.warning(f"PDF: {e}")
+        with d2:
+            st.download_button("🌐 HTML", data=html.encode("utf-8"),
+                               file_name=f"KarbonAT_{tur_id}_{fac_id}.html", mime="text/html",
+                               key=f"mthtml_{fac_id}_{tur_id}", use_container_width=True)
+        with d3:
+            try:
+                st.download_button("📄 Word", data=raporlar.rapor_docx(icerik),
+                                   file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
+                                   mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                   key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+            except Exception as e:  # noqa: BLE001
+                st.warning(f"Word: {e}")
+        with d4:
+            if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+                save_media(fac_id, tur_id, icerik)
+                st.toast("Düzenleme kaydedildi.")
+                st.rerun()
+        return
+
+    icerik = st.text_area(
+        "İçerik — buradan düzenleyebilirsin",
+        value=kayit["metin"],
+        height=300,
+        key=mte_key,
+    )
+    st.caption("Tablolar aşağıda kaydırmalı tablo olarak gösterilir; PDF/Word gerçek tablo içerir.")
+    _markdown_blok(icerik)
+
+    st.markdown("---")
+    d1, d2, d3 = st.columns(3)
+    with d1:
+        try:
+            st.download_button("⬇️ PDF", data=raporlar.rapor_pdf(icerik),
+                               file_name=f"KarbonAT_{tur_id}_{fac_id}.pdf", mime="application/pdf",
+                               key=f"mpdf_{fac_id}_{tur_id}", use_container_width=True)
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"PDF: {e}")
+    with d2:
+        try:
+            st.download_button("📄 Word (.docx)", data=raporlar.rapor_docx(icerik),
+                               file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
+                               mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"Word: {e}")
+    with d3:
+        if st.button("💾 Düzenlemeyi Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+            save_media(fac_id, tur_id, icerik)
+            st.toast("Düzenleme kaydedildi.")
+            st.rerun()
+
+
+def _icerik_grid(fac_id, grup_id, turler):
+    secim_key = f"medya_detay_{fac_id}_{grup_id}"
+    SUTUN = 3
+    cols = st.columns(SUTUN)
+    for i, tur in enumerate(turler):
+        kayit = get_media(fac_id, tur["id"])
+        durum = "✅ Kayıtlı" if kayit else "⏳ Beklemede"
+        with cols[i % SUTUN]:
+            if st.button(f"{tur['emoji']} {tur['baslik']}", key=f"mcd_{fac_id}_{grup_id}_{tur['id']}",
+                         use_container_width=True):
+                st.session_state[secim_key] = tur["id"]
+                st.rerun()
+            st.caption(f"{durum} · {' · '.join(tur.get('ciktilar', []))}")
+
+    secilen = st.session_state.get(secim_key)
+    if secilen and secilen in {t["id"] for t in turler}:
+        st.markdown("---")
+        tur = next(t for t in turler if t["id"] == secilen)
+        _icerik_detay(fac_id, tur)
 
 
 def adim_icerik():
@@ -1279,12 +1460,12 @@ def adim_icerik():
                 yiginlar.setdefault(t.get("alt_grup", t["id"]), []).append(t)
             for yig in yiginlar.values():
                 if len(yig) == 1:
-                    _icerik_karti(tesis["id"], yig[0])
+                    _icerik_grid(tesis["id"], g["id"], yig)
                 else:
                     alt_tabs = st.tabs([t["alt_baslik"] for t in yig])
                     for at, t in zip(alt_tabs, yig):
                         with at:
-                            _icerik_karti(tesis["id"], t)
+                            _icerik_grid(tesis["id"], g["id"], [t])
 
     st.markdown("---")
     if st.button("← Tesis Seçimine Dön", type="secondary"):

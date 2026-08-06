@@ -9,7 +9,11 @@
 # ============================================
 from __future__ import annotations
 
+import os
+import re
 from io import BytesIO
+
+import pandas as pd
 
 # Deterministik tablo üreticileri
 from tga_tables import (
@@ -21,15 +25,6 @@ from tga_tables import (
 )
 
 RAPOR_SABLONLARI = [
-    {
-        "id": "anlati",
-        "emoji": "📄",
-        "baslik": "Sürdürülebilirlik Raporu (Tablo 4)",
-        "tip": "ai",
-        "cikti": ["PDF"],
-        "kaynak": ["Raporlamasi", "Politika"],
-        "aciklama": "TGA Tablo 4 formatında, tesis verileriyle doldurulmuş anlatı raporu; yönetim mesajı, performans, hedefler ve uyum maddeleri.",
-    },
     {
         "id": "tablo1",
         "emoji": "⚠️",
@@ -56,6 +51,15 @@ RAPOR_SABLONLARI = [
         "cikti": ["PDF"],
         "kaynak": ["Tablo 3"],
         "aciklama": "Çevre ve turizm mevzuatına uygunluk listesi; ilgili yükümlülükleri ve uyum durumu.",
+    },
+    {
+        "id": "anlati",
+        "emoji": "📄",
+        "baslik": "Sürdürülebilirlik Raporu (Tablo 4)",
+        "tip": "ai",
+        "cikti": ["PDF"],
+        "kaynak": ["Raporlamasi", "Politika"],
+        "aciklama": "TGA Tablo 4 formatında, tesis verileriyle doldurulmuş anlatı raporu; yönetim mesajı, performans, hedefler ve uyum maddeleri.",
     },
     {
         "id": "tablo5",
@@ -94,15 +98,6 @@ RAPOR_SABLONLARI = [
         "aciklama": "Plastik/ambalajlı ürün sarfiyat takip formatı; azaltma önerileriyle.",
     },
     {
-        "id": "politika_set",
-        "emoji": "📋",
-        "baslik": "Sürdürülebilirlik Politika Seti",
-        "tip": "ai",
-        "cikti": ["PDF"],
-        "kaynak": ["POLITIKASI", "Politika"],
-        "aciklama": "Çevre/atık, enerji, kadın & cinsiyet, çocuk hakları, satın alma ve ana politika belgesi; her biri kendi maddeleriyle tesise uyarlanır.",
-    },
-    {
         "id": "tablo10",
         "emoji": "🔌",
         "baslik": "Elektrik Tüketim Takibi (Tablo 10)",
@@ -137,6 +132,15 @@ RAPOR_SABLONLARI = [
         "cikti": ["Excel"],
         "kaynak": [],
         "aciklama": "Atık türü bazında aylık miktar; bertaraf ve geri kazanım.",
+    },
+    {
+        "id": "politika_set",
+        "emoji": "📋",
+        "baslik": "Sürdürülebilirlik Politika Seti",
+        "tip": "ai",
+        "cikti": ["PDF"],
+        "kaynak": ["POLITIKASI", "Politika"],
+        "aciklama": "Çevre/atık, enerji, kadın & cinsiyet, çocuk hakları, satın alma ve ana politika belgesi; her biri kendi maddeleriyle tesise uyarlanır.",
     },
 ]
 
@@ -226,34 +230,188 @@ def rapor_uretim(sablon_id: str, tesis: dict, sonuc: dict | None, prefs: dict | 
     return {"sablon_id": sablon_id, "tip": "ai", "metin": metin, "xlsx": None}
 
 
+# ---------------- Markdown tablo ayrıştırıcı (UI + DOCX + XLSX ortak) ----------------
+def markdown_bloklar(metin: str) -> list[tuple]:
+    """Markdown'ı bloklara böler: ("md", metin) veya ("tablo", DataFrame)."""
+    satirlar = metin.splitlines()
+    bloklar = []
+    i = 0
+    n = len(satirlar)
+    while i < n:
+        s = satirlar[i].strip()
+        if s.startswith("|"):
+            tab = []
+            while i < n and satirlar[i].strip().startswith("|"):
+                tab.append(satirlar[i].strip())
+                i += 1
+            rows = [[c.strip() for c in r.strip("|").split("|")] for r in tab]
+            rows = [r for r in rows if not all(set(c) <= {"-", ":", " "} for c in r)]
+            rows = [r for r in rows if any(r)]
+            if len(rows) >= 2:
+                df = pd.DataFrame(rows[1:], columns=rows[0])
+                bloklar.append(("tablo", df))
+            elif rows:
+                bloklar.append(("md", rows[0][0]))
+        elif not s:
+            i += 1
+        else:
+            parca = []
+            while i < n:
+                k = satirlar[i].strip()
+                if not k or k.startswith("|"):
+                    break
+                parca.append(satirlar[i])
+                i += 1
+            bloklar.append(("md", "\n".join(parca)))
+    return bloklar
+
+
+# ---------------- DOCX (gerçek Word tabloları) ----------------
+def _docx_ekle_blok(doc, blok):
+    tur, icerik = blok
+    if tur == "tablo":
+        df = icerik
+        if doc.tables:
+            doc.add_paragraph()
+        tablo = doc.add_table(rows=1, cols=max(1, len(df.columns)))
+        tablo.style = "Light Grid Accent 1"
+        for j, c in enumerate(df.columns):
+            tablo.rows[0].cells[j].text = str(c)
+        for _, row in df.iterrows():
+            hucreler = tablo.add_row().cells
+            for j, v in enumerate(row):
+                if j < len(hucreler):
+                    hucreler[j].text = "" if pd.isna(v) else str(v)
+        return
+    for satir in icerik.splitlines():
+        s = satir.strip()
+        if not s:
+            continue
+        if s.startswith("### "):
+            doc.add_heading(s[4:].replace("**", ""), level=2)
+        elif s.startswith("## "):
+            doc.add_heading(s[3:].replace("**", ""), level=1)
+        elif s.startswith("# "):
+            doc.add_heading(s[2:].replace("**", ""), level=0)
+        elif s.startswith(("-", "*")):
+            doc.add_paragraph(s.lstrip("-* ").replace("**", ""), style="List Bullet")
+        else:
+            doc.add_paragraph(s.replace("**", ""))
+
+
+def rapor_docx(metin: str) -> bytes:
+    """Markdown'ı gerçek Word tablolarıyla .docx yapar."""
+    from docx import Document
+
+    doc = Document()
+    for blok in markdown_bloklar(metin):
+        _docx_ekle_blok(doc, blok)
+    buffer = BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+# ---------------- XLSX (tablo başına ayrı sayfa) ----------------
+def rapor_xlsx(metin: str) -> bytes:
+    """Markdown tablolarını ayrı sayfalara; kalan metni 'Metin' sayfasına yazar."""
+    buffer = BytesIO()
+    bloklar = markdown_bloklar(metin)
+    tablolar = [b for b in bloklar if b[0] == "tablo"]
+    metinler = [b[1] for b in bloklar if b[0] == "md"]
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for i, (_, df) in enumerate(tablolar):
+            df.to_excel(writer, sheet_name=f"Tablo_{i + 1}"[:31], index=False)
+        if metinler:
+            metin_df = pd.DataFrame({"İçerik": [m for p in metinler for m in p.splitlines() if m.strip()]})
+            metin_df.to_excel(writer, sheet_name="Metin", index=False)
+        if not tablolar and not metinler:
+            pd.DataFrame().to_excel(writer, sheet_name="Bos", index=False)
+    return buffer.getvalue()
+
+
+# ---------------- PDF (Türkçe font destekli) ----------------
+_PDF_FONTLAR = None
+
+
+def _pdf_font_ayar():
+    """Türkçe karakterleri gösteren bir TTF font bulup reportlab'e kaydeder."""
+    global _PDF_FONTLAR
+    if _PDF_FONTLAR:
+        return _PDF_FONTLAR
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    adaylar = [
+        ("ArialTR", r"C:\Windows\Fonts\arial.ttf", "ArialTR-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
+        ("DejaVuSans", r"C:\Windows\Fonts\dejavusans.ttf", "DejaVuSans-Bold", r"C:\Windows\Fonts\dejavusans-bold.ttf"),
+        ("TimesNewRomanTR", r"C:\Windows\Fonts\times.ttf", "TimesNewRomanTR-Bold", r"C:\Windows\Fonts\timesbd.ttf"),
+    ]
+    for ad, yol, bad, byol in adaylar:
+        if os.path.exists(yol):
+            pdfmetrics.registerFont(TTFont(ad, yol))
+            if os.path.exists(byol):
+                try:
+                    pdfmetrics.registerFont(TTFont(bad, byol))
+                except Exception:  # noqa: BLE001
+                    bad = None
+            _PDF_FONTLAR = (ad, bad)
+            return _PDF_FONTLAR
+    _PDF_FONTLAR = ("Helvetica", "Helvetica-Bold")
+    return _PDF_FONTLAR
+
+
 def rapor_pdf(metin: str) -> bytes:
-    """AI rapor metnini basit bir PDF'e çevirir."""
+    """Rapor metnini Türkçe karakter destekli PDF'e çevirir; tablolar gerçek PDF tablosu olur."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.lib import colors
 
+    font_ad, font_bold = _pdf_font_ayar()
+    bold = font_bold or font_ad
     buffer = BytesIO()
     stiller = getSampleStyleSheet()
-    baslik = ParagraphStyle("Bas", parent=stiller["Title"], fontName="Helvetica-Bold", fontSize=15, spaceAfter=8)
-    h2 = ParagraphStyle("H2", parent=stiller["Heading2"], fontSize=12, spaceBefore=6, spaceAfter=3)
-    govde = ParagraphStyle("Govde", parent=stiller["BodyText"], fontSize=9.5, leading=14)
+    baslik = ParagraphStyle("Bas", parent=stiller["Title"], fontName=bold, fontSize=14, spaceAfter=8)
+    h2 = ParagraphStyle("H2", parent=stiller["Heading2"], fontName=bold, fontSize=11.5, spaceBefore=6, spaceAfter=3)
+    govde = ParagraphStyle("Govde", parent=stiller["BodyText"], fontName=font_ad, fontSize=9, leading=13)
 
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=15 * mm, bottomMargin=15 * mm,
-                            leftMargin=15 * mm, rightMargin=15 * mm)
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=14 * mm, bottomMargin=14 * mm,
+                            leftMargin=14 * mm, rightMargin=14 * mm)
     akis = []
-    for satir in metin.splitlines():
-        satir = satir.strip()
-        if not satir:
-            akis.append(Spacer(1, 4))
+    for tur, icerik in markdown_bloklar(metin):
+        if tur == "tablo":
+            df = icerik
+            veri = [[str(c) for c in df.columns]] + [[("" if pd.isna(v) else str(v)) for v in r] for r in df.itertuples(index=False)]
+            tablo = Table(veri, repeatRows=1, hAlign="LEFT")
+            tablo.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (-1, 0), bold),
+                ("FONTNAME", (0, 1), (-1, -1), font_ad),
+                ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d6b45")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cfd8cf")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef4ee")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            akis.append(tablo)
+            akis.append(Spacer(1, 6))
             continue
-        if satir.startswith("### "):
-            akis.append(Paragraph(satir[4:].replace("**", ""), h2))
-        elif satir.startswith("# "):
-            akis.append(Paragraph(satir[2:].replace("**", ""), baslik))
-        elif satir.startswith(("-", "*")):
-            akis.append(Paragraph("• " + satir.lstrip("-* ").replace("**", ""), govde))
-        else:
-            akis.append(Paragraph(satir.replace("**", ""), govde))
+        for satir in icerik.splitlines():
+            satir = satir.strip()
+            if not satir:
+                akis.append(Spacer(1, 4))
+                continue
+            if satir.startswith("### "):
+                akis.append(Paragraph(satir[4:].replace("**", ""), h2))
+            elif satir.startswith("# "):
+                akis.append(Paragraph(satir[2:].replace("**", ""), baslik))
+            elif satir.startswith(("-", "*")):
+                akis.append(Paragraph("• " + satir.lstrip("-* ").replace("**", ""), govde))
+            else:
+                akis.append(Paragraph(satir.replace("**", ""), govde))
     doc.build(akis)
     return buffer.getvalue()

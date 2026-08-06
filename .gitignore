@@ -11,3 +11,6 @@ data/
 # Sistem
 Thumbs.db
 .DS_Store
+
+# Ortam / gizli anahtarlar
+.env
