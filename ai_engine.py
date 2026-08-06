@@ -120,15 +120,15 @@ def _tesis_ozeti(tesis: dict, sonuc: dict | None) -> str:
 
 # Tür başına GÖREV talimatı — AI yalnızca kendi başlığına/amacına yanıt verir.
 TUR_GOREV = {
-    "web": "Yalnız otel web sitesinin 'Sürdürülebilirlik' sayfası için metin üret. Rapor, politika, sosyal medya gönderisi YAZMA.",
-    "brosur": "Yalnız 1 sayfalık misafir broşürü (bayi/kapak metnini) üret. İstatistik vurgulu, kısa.",
-    "qr": "Yalnız oda kapı kartı boyutunda QR kart içeriği üret: kısa mesaj + 3-4 ikon/sayı + QR yönlendirme açıklaması.",
-    "basin_bulteni": "Yalnız basın bülteni taslağı üret: manşet, spot, somut rakamlar ve yönetim alıntısı.",
-    "sosyal_medya": "Yalnız sosyal medya (Instagram/LinkedIn/X) gönderi paketi üret: metin, hashtag, alt yazı, takvim. Politika/rapor YAZma.",
-    "politika": "Yalnız sürdürülebilirlik politikası özeti üret; taahhüt maddeleri ve sorumluluk.",
-    "egitim": "Yalnız personel eğitim kayıt/planlama içeriği üret: eğitim takvimi, konular, katılımcı notları.",
-    "gorsel_afis": "Yalnız görsel/image-prompt üret (Poster/Sosyal/Kart). Metin kısmı yalnız görsele eşlik eden kısa slogan ve image prompt'tur; rapor/politika YAZma.",
-    "anket_misafir": "Yalnız misafir sürdürülebilirlik anketi soru seti üret (memmniyet + farkındalık).",
+    "web": "Yalnız otel web sitesinin 'Sürdürülebilirlik' sayfası için hazır web metni üret. Rapor, politika, sosyal medya gönderisi YAZMA.",
+    "brosur": "Yalnız misafir broşürüne BASILACAK hazır metin üret: başlık, kısa bölümler, madde/istatistik vurgulu. Kapak ve bölüm başlıklarını ### ile işaretle.",
+    "qr": "Yalnız oda/QR kartının ÜZERİNDE görünecek hazır metin üret: tek cümlelik ana mesaj, 3-4 ikon/sayı başlığı (örn. 'Su Tasarrufu %32'), QR doğrulama açıklaması. Talimat/prompt YAZMA.",
+    "basin_bulteni": "Yalnız yayınlanmaya HAZIR basın bülteni metni üret: manşet, spot, gelişme paragrafları, yönetimden alıntı, iletişim. 'bülten şöyle olmalı' anlatımı YASAK.",
+    "sosyal_medya": "Yalnız paylaşılabilecek HAZIR gönderi metinleri üret; her platform (Instagram/LinkedIn/X) için ayrı ### bölümü: gönderi metni + hashtagler + görsel alt yazısı. 'şöyle yapın' anlatımı YASAK.",
+    "politika": "Yalnız sürdürülebilirlik politikası özeti üret; taahhüt maddeleri ve sorumluluk. Hazır politika metni yaz, talimat değil.",
+    "egitim": "Yalnız personel eğitim kayıt/planlama içeriği üret: eğitim takvimi, konular, katılımcı kaydı.",
+    "gorsel_afis": "Yalnız afişe/postere BASILACAK hazır metin üret: büyük başlık, alt başlık/slogan, 3 sayı kartı, kısa bölüm metinleri, rozet ve QR yönlendirme. Image-prompt/üretim talimatı/kompozisyon tarifi KESİNLİKLE YAZMA.",
+    "anket_misafir": "Yalnız misafir sürdürülebilirlik anketi soru seti üret (memnuniyet + farkındalık).",
     "anket_personel": "Yalnız personel farkındalık ve eğitim geri bildirim anketi soru seti üret.",
 }
 
@@ -233,7 +233,9 @@ REFERANS ŞABLONLAR (RAG; TGA'nın gerçek şablon/politika dili — bu dilden v
 
 KURALLAR:
 - Yalnız markdown çıktı, giriş cümlesi yok.
-- Rakipları/hukuk dili/yanlış iddia (green-claim) kullanma; somut veri yoksa genel ve temkinli yaz.
+- KESİNLİKLE talimat, yönerge, prompt, 'nasıl yapılır' açıklaması VEYA tasarım/kompozisyon tarifi yazma. Çıktı yalnızca ürünün üzerinde/basılacak halinde GÖRÜNECEK SON HAZIR METİN olmalı.
+- Bölüm/alan başlıklarını markdown başlığı olarak yaz (### Başlık) — tasarım motoru bunları görselde başlık olarak kullanır.
+- Rakipleri/hukuk dili/yanlış iddia (green-claim) kullanma; somut veri yoksa genel ve temkinli yaz.
 - Türkçe (dil tercihi farklıysa ona uy).
 - İçerik uzunluğu: {prefs.get('uzunluk','Orta')}.
 - Ton: {prefs.get('ton','Kurumsal & Resmi')}. Hedef kitle: {prefs.get('hedef_kitle','Misafir')}.

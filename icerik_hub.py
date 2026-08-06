@@ -124,9 +124,9 @@ ICERIK_TURLERI = [
         "baslik": "Görsel & Afiş",
         "ciktilar": ["Poster", "Sosyal", "Kart"],
         "aciklama": (
-            "Pazarlama görselleri için AI image-prompt üretici (Flux/Midjourney). Amaç, "
-            "hedef kitle, ton, görsel tema ve metin yönlendirmesi alır → görsel prompt "
-            "metni ve eşlik eden pazarlama metni üretir. Şimdilik iskelettir."
+            "Afiş/postera basılacak HAZIR metin üretir: büyük başlık, alt başlık, "
+            "sayı kartları, kısa bölüm metinleri ve rozet/QR satırı. Görsel kendisi "
+            "KarbonAT tasarım katmanı tarafından oluşturulur."
         ),
     },
     {
@@ -190,10 +190,10 @@ ISKELETLER = {
         "QR / iletişim",
     ],
     "qr": [
-        "Kart ön yüz — tesis adı + logo + kısa iddia",
-        "QR kod (web sürdürülebilirlik sayfası)",
-        "Arka yüz — 3-4 ikon + sayı (enerji/su/atık)",
-        "Dil seçeneği (TR/EN)",
+        "Ana mesaj (tek cümle kısa iddia)",
+        "İkon/sayı kartları — 3-4 adet (enerji tasarrufu, su tasarrufu, geri kazanım, emisyon)",
+        "QR doğrulama yönlendirmesi (web sayfasına götüren açıklama)",
+        "Rozet/ileti satırı (GSTC/TGA)",
     ],
     "basin_bulteni": [
         "Başlık / manşet",
@@ -211,12 +211,10 @@ ISKELETLER = {
         "Green-claim uyarı notu (A6)",
     ],
     "gorsel_afis": [
-        "Ana kompozisyon — manzara, objeler, yerleşim (odak)",
-        "Renk paleti ve ışık / atmosfer",
-        "Metin & slogan yerleşimi (poster-sosyal-kart varyantları)",
-        "Stil rehberi (fotorealist / illüstrasyon / minimal-marka)",
-        "Amaç tarafına uyan örnek prompt + tesis verisi ekleme önerisi",
-        "Eşlik eden pazarlama alt yazısı (opsiyonel)",
+        "Büyük başlık (tesis adı) ve alt başlık / slogan",
+        "3 öne çıkan sayı kartı etiketi (enerji, su, atık/emisyon)",
+        "Kısa bölüm metinleri (emisyon, su, atık, yerel & topluluk)",
+        "Çağrı/rozet satırı (GSTC/TGA) ve QR doğrulama yönlendirmesi",
     ],
     "politika": [
         "Amaç & Kapsam",
