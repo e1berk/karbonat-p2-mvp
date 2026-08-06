@@ -7,9 +7,9 @@
 #   Veriler -> Content Engine -> Şablonlar -> Çıktılar
 #   Aynı veri havuzu, onlarca farklı formatta (PDF/Web/QR/Sosyal).
 #
-# NOT: Üretim/indirme katmanı şimdilik DEAKTİF.
-# GENERATORLAR içindeki her girdi, ilgili türün üretici fonksiyonuna
-# bağlanınca aktifleşecek. AI'sız şablon motoru bu sürümde yok.
+# NOT: Üretim ai_engine üzerinden AKTİF. GENERATORLAR registry ileride
+# tür başına özel fonksiyonlar için tutulur; şu an medya üretimi
+# ai_engine.uretim_olustur'a bağlıdır. Raporlama raporlar.py'dedir.
 # ============================================
 
 # Amaca göre gruplar (İçerik Merkezi üst sekmeleri)
@@ -23,6 +23,7 @@ AMAC_GRUPLARI = [
 ICERIK_TURLERI = [
     {
         "id": "rapor",
+        "sistem": "rapor",
         "grup": "raporlama",
         "emoji": "📄",
         "baslik": "Sürdürülebilirlik Raporu",
@@ -34,6 +35,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "web",
+        "sistem": "medya",
         "grup": "iletisim",
         "emoji": "🌐",
         "baslik": "Web Sayfası İçeriği",
@@ -45,6 +47,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "brosur",
+        "sistem": "medya",
         "grup": "iletisim",
         "emoji": "📖",
         "baslik": "Misafir Broşürü",
@@ -56,6 +59,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "qr",
+        "sistem": "medya",
         "grup": "iletisim",
         "emoji": "📱",
         "baslik": "QR / Oda Kartı",
@@ -67,6 +71,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "basin_bulteni",
+        "sistem": "medya",
         "grup": "iletisim",
         "emoji": "📰",
         "baslik": "Basın Bülteni",
@@ -78,6 +83,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "sosyal_medya",
+        "sistem": "medya",
         "grup": "iletisim",
         "emoji": "📣",
         "baslik": "Sosyal Medya",
@@ -89,6 +95,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "politika",
+        "sistem": "rapor",
         "grup": "politikalar",
         "emoji": "📋",
         "baslik": "Politika Özeti",
@@ -100,6 +107,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "egitim",
+        "sistem": "medya",
         "grup": "egitim_anket",
         "emoji": "🎓",
         "baslik": "Eğitim Kayıtları",
@@ -110,6 +118,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "gorsel_afis",
+        "sistem": "medya",
         "grup": "iletisim",
         "emoji": "🎨",
         "baslik": "Görsel & Afiş",
@@ -122,6 +131,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "anket_misafir",
+        "sistem": "medya",
         "grup": "egitim_anket",
         "alt_grup": "anket",
         "alt_baslik": "Misafir Anketi",
@@ -135,6 +145,7 @@ ICERIK_TURLERI = [
     },
     {
         "id": "anket_personel",
+        "sistem": "medya",
         "grup": "egitim_anket",
         "alt_grup": "anket",
         "alt_baslik": "Personel Anketi",
@@ -359,11 +370,6 @@ TURE_OZEL_SORULAR = {
             "anahtar": "metin_var",
             "soru": "Metin / Slogan",
             "secenekler": ["Kısa slogan", "Başlık + alt başlık", "Metinsiz (saf görsel)"],
-        },
-        {
-            "anahtar": "tema",
-            "soru": "Renk Teması",
-            "secenekler": ["Orman (yeşil)", "Okyanus (mavi)", "Toprak (toprak tonlu)", "Minimal (monokrom)", "Marka uyumlu"],
         },
     ],
     "politika": [

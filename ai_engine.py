@@ -109,6 +109,66 @@ def _tesis_ozeti(tesis: dict, sonuc: dict | None) -> str:
     return "\n".join(satirlar)
 
 
+# Tür başına GÖREV talimatı — AI yalnızca kendi başlığına/amacına yanıt verir.
+TUR_GOREV = {
+    "web": "Yalnız otel web sitesinin 'Sürdürülebilirlik' sayfası için metin üret. Rapor, politika, sosyal medya gönderisi YAZMA.",
+    "brosur": "Yalnız 1 sayfalık misafir broşürü (bayi/kapak metnini) üret. İstatistik vurgulu, kısa.",
+    "qr": "Yalnız oda kapı kartı boyutunda QR kart içeriği üret: kısa mesaj + 3-4 ikon/sayı + QR yönlendirme açıklaması.",
+    "basin_bulteni": "Yalnız basın bülteni taslağı üret: manşet, spot, somut rakamlar ve yönetim alıntısı.",
+    "sosyal_medya": "Yalnız sosyal medya (Instagram/LinkedIn/X) gönderi paketi üret: metin, hashtag, alt yazı, takvim. Politika/rapor YAZma.",
+    "politika": "Yalnız sürdürülebilirlik politikası özeti üret; taahhüt maddeleri ve sorumluluk.",
+    "egitim": "Yalnız personel eğitim kayıt/planlama içeriği üret: eğitim takvimi, konular, katılımcı notları.",
+    "gorsel_afis": "Yalnız görsel/image-prompt üret (Poster/Sosyal/Kart). Metin kısmı yalnız görsele eşlik eden kısa slogan ve image prompt'tur; rapor/politika YAZma.",
+    "anket_misafir": "Yalnız misafir sürdürülebilirlik anketi soru seti üret (memmniyet + farkındalık).",
+    "anket_personel": "Yalnız personel farkındalık ve eğitim geri bildirim anketi soru seti üret.",
+}
+
+# Tür başına RAG filtre anahtarları (yalnız ilgili şablon kaynaklarından beslenir).
+TUR_RAG_FILTRE = {
+    "web": ["POLITIKASI", "Politika", "Raporlamasi"],
+    "brosur": ["POLITIKASI", "Politika", "Raporlamasi"],
+    "qr": ["Politika"],
+    "basin_bulteni": ["Raporlamasi", "Politika"],
+    "sosyal_medya": ["Politika", "Raporlamasi"],
+    "politika": ["POLITIKASI", "Politika"],
+    "egitim": ["EGITIM", "Egitim"],
+    "gorsel_afis": [],
+    "anket_misafir": ["Tablo 5", "Anket"],
+    "anket_personel": ["Tablo 5", "Anket", "Egitim"],
+}
+
+
+def _rag_filtreli(soru: str, terimler: list[str], k: int = 4) -> list[dict]:
+    """KB'de kosinüs araması yapar, ardından şablon kaynak adına göre filtreler."""
+    sonuclar = rag_sorgu(soru, k=k * 3)
+    if not terimler:
+        return sonuclar[:k]
+    alt = [r for r in sonuclar
+           if any(t.lower() in r["kaynak"].lower() for t in terimler)]
+    return (alt or sonuclar)[:k]
+
+
+def _gemini_cagir(prompt: str) -> str:
+    """Model fallback'li Gemini çağrısı — markdown döner."""
+    c = _client()
+    hata = None
+    for model in GEN_MODELS:
+        try:
+            r = c.models.generate_content(
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "text/plain"},
+            )
+            metin = (r.text or "").strip()
+            if not metin:
+                raise RuntimeError("Boş yanıt")
+            return metin
+        except Exception as e:  # noqa: BLE001 — model fallback
+            hata = e
+            print(f"  ! {model} başarısız: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+    raise RuntimeError(f"Tüm üretim modelleri başarısız. Son hata: {hata}")
+
+
 # ---------------- Üretim ----------------
 def uretim_olustur(
     tur_id: str,
@@ -128,7 +188,11 @@ def uretim_olustur(
 
     tesis_md = _tesis_ozeti(tesis, sonuc)
 
-    rag = rag_sorgu(f"{tur['baslik']} {prefs.get('amac','')} {prefs.get('vurgu','')}", k=5)
+    rag = _rag_filtreli(
+        f"{tur['baslik']} {prefs.get('amac','')} {prefs.get('vurgu','')}",
+        TUR_RAG_FILTRE.get(tur_id, []),
+        k=5,
+    )
     if rag:
         rag_md = "\n\n---\n\n".join(
             f"[{r['kaynak']}]\n{r['metin']}" for r in rag
@@ -139,6 +203,9 @@ def uretim_olustur(
     prompt = f"""Sen KarbonAT'ın içerik üreticisisin; Türkiye'de GSTC/TGA uyumlu çalışan bir otelin sürdürülebilirlik içeriklerini yazıyorsun.
 
 GÖREV: "{tur['baslik']}" türünde markdown içerik üret.
+
+TÜR SINIRI (yalnız buna uy, ekstra konu açma):
+{TUR_GOREV.get(tur_id, 'Yalnız bu türün içeriği.')}
 
 İÇERİK TÜRÜ AÇIKLAMASI:
 {tur.get('aciklama','')}
@@ -164,23 +231,41 @@ KURALLAR:
 - Ek kullanıcı notu: {prefs.get('notlar','(yok)')}
 """
 
-    c = _client()
-    hata = None
-    for model in GEN_MODELS:
-        try:
-            r = c.models.generate_content(
-                model=model,
-                contents=prompt,
-                config={"response_mime_type": "text/plain"},
-            )
-            metin = (r.text or "").strip()
-            if not metin:
-                raise RuntimeError("Boş yanıt")
-            return metin
-        except Exception as e:  # noqa: BLE001 — model fallback
-            hata = e
-            print(f"  ! {model} başarısız: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
-    raise RuntimeError(f"Tüm üretim modelleri başarısız. Son hata: {hata}")
+    return _gemini_cagir(prompt)
+
+
+def oner_rapor(sablon: dict, tesis: dict, sonuc: dict | None, prefs: dict | None = None) -> str:
+    """Rapor şablonu için Gemini ile markdown üretir. RAG yalnız bu şablonun kaynağından beslenir."""
+    prefs = prefs or {}
+    tesis_md = _tesis_ozeti(tesis, sonuc)
+    terimler = sablon.get("kaynak", [])
+    rag = _rag_filtreli(sablon["baslik"], terimler, k=5)
+    if rag:
+        rag_md = "\n\n---\n\n".join(f"[{r['kaynak']}]\n{r['metin']}" for r in rag)
+    else:
+        rag_md = "(Şablon referansı KB'de bulunamadı; formata genel TGA bilgisiyle uy.)"
+
+    prompt = f"""Sen KarbonAT'ın rapor üreticisisin; Türkiye GSTC/TGA uyumlu otellerin resmî sürdürülebilirlik raporlama belgelerini hazırlıyorsun.
+
+GÖREV: "{sablon['baslik']}" belgesini tesis verisine göre AYNI FORMATTA doldur.
+SINIR: Yalnız bu şablonun içeriği; başka şablonun formatına kayma/suneler açma.
+
+ŞABLON AÇIKLAMASI:
+{sablon.get('aciklama','')}
+
+TESİS VERİSİ (somut rakamları AYNEN kullan):
+{tesis_md}
+
+REFERANS ŞABLON (RAG — format/kolon/taahhüt dili buradan; birebir kopyalama):
+{rag_md}
+
+ÜRETİM BİÇİMİ:
+- Yalnız markdown çıktı, giriş cümlesi yok.
+- Şablonun gerçek sütun/bölüm başlıklarını kullan (Tablo X kolon adları vb.).
+- Veri yoksa hücreyi "-" bırak ya da temkinli öner; uydurma rakam YAZMA.
+- Türkçe; ton {prefs.get('ton','Kurumsal & Resmi')}; uzunluk {prefs.get('uzunluk','Detaylı')}.
+"""
+    return _gemini_cagir(prompt)
 
 
 def varsayilan_prefs():

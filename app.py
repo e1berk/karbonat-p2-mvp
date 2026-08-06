@@ -29,6 +29,7 @@ from icerik_hub import (
     tercih_sorulari,
     varsayilan_tercih,
 )
+import ai_engine
 from data_store import (
     list_facilities,
     get_facility,
@@ -43,7 +44,10 @@ from data_store import (
     count_facilities,
     get_content_prefs,
     save_content_prefs,
+    get_report,
+    save_report,
 )
+import raporlar
 
 # ==============================================
 # MARKA KİMLİĞİ - KARBON & ORMAN
@@ -223,7 +227,7 @@ STEP_ISIMLERI = [
     ("📊", "Veri Girişi"),
     ("🧮", "Hesaplama"),
     ("📄", "Rapor"),
-    ("🌿", "İçerikler"),
+    ("📣", "Medya"),
 ]
 
 
@@ -460,9 +464,18 @@ def adim_tesis_secimi():
                 )
 
             st.markdown("")
+            a, b = st.columns(2)
+            with a:
+                if st.button("📊 Raporlar", use_container_width=True):
+                    st.session_state.show_raporlar = True
+                    st.rerun()
+            with b:
+                if st.button("📣 Medya & İçerik", use_container_width=True, type="secondary"):
+                    st.session_state.step = 5
+                    st.rerun()
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("📊 Veri Girişi", use_container_width=True):
+                if st.button("📊 Veri Girişi", use_container_width=True, type="secondary"):
                     st.session_state.history = list_records(st.session_state.facility_id)
                     st.session_state.step = 2
                     st.rerun()
@@ -471,14 +484,29 @@ def adim_tesis_secimi():
                     st.session_state.step = 1
                     st.rerun()
             with c3:
-                if st.button("🌿 İçerik Merkezi", use_container_width=True, type="secondary"):
-                    st.session_state.step = 5
+                if st.button("＋ Yeni Tesis", use_container_width=True, type="secondary"):
+                    st.session_state.tesis = {}
+                    st.session_state.facility_id = None
+                    st.session_state.step = 1
                     st.rerun()
-            if st.button("＋ Yeni Tesis Oluştur", use_container_width=True, type="secondary"):
-                st.session_state.tesis = {}
-                st.session_state.facility_id = None
-                st.session_state.step = 1
-                st.rerun()
+
+        st.markdown("---")
+        with st.expander(
+            "📊 Raporlar — aylara göre",
+            expanded=bool(st.session_state.get("show_raporlar", False)),
+        ):
+            donemler = list_records(st.session_state.facility_id)
+            if not donemler:
+                st.caption(
+                    "Henüz rapor yok. Önce veri girişi + hesaplama yapın; sonuç ekranındaki "
+                    "📊 Raporlar bölümü raporlarınızı üretir ve burada aylara göre saklanır."
+                )
+            else:
+                secenek = {format_donem(r["period"]): r["period"] for r in donemler}
+                sec_period = st.selectbox("Dönem seçin", list(secenek), key="profil_rapor_period")
+                rec = get_record(st.session_state.facility_id, secenek[sec_period])
+                if rec:
+                    _rapor_karti(st.session_state.facility_id, rec["period"], rec["sonuc"])
     else:
         with col:
             st.markdown('<div class="section-title">Henüz oteliniz yok</div>', unsafe_allow_html=True)
@@ -819,6 +847,69 @@ def adim_hesap():
 # ==============================================
 # ADIM 4 - SONUÇ + RAPOR (TEKİLLEŞTİRİLMİŞ)
 # ==============================================
+# RAPORLAR (raporlama alt sistemi) — sonuç + profil'de paylaşılır
+# ==============================================
+def _rapor_karti(fac_id, period, sonuc):
+    if not sonuc:
+        st.info("Önce hesaplama yapın; raporlar veriyle dolar.")
+        return
+    tesis = sonuc.get("tesis") or {}
+    st.markdown('<div class="section-title">📊 Raporlar</div>', unsafe_allow_html=True)
+    st.caption(
+        "Referans TGA şablonlarının her biri tesis verilerinizle AYRI AYRI üretilir. "
+        "Ürettikleriniz profilinizde (Raporlar → aylar) saklanır."
+    )
+    prefs = {"amac": "Raporlama", "ton": "Kurumsal & Resmi", "dil": "Türkçe", "uzunluk": "Detaylı"}
+    for sab in raporlar.RAPOR_SABLONLARI:
+        sab_id = sab["id"]
+        cikti = "".join(f'<span class="chip" style="font-size:11px;">🖨️ {c}</span>' for c in sab["cikti"])
+        kayit = get_report(fac_id, period, sab_id)
+        durum = "✅ Kayıtlı" if kayit else "⏳ Beklemede"
+        with st.expander(f"{sab['emoji']} {sab['baslik']}  ·  {durum}  {cikti}", expanded=bool(kayit)):
+            st.caption(sab["aciklama"])
+            if st.button("🚀 Üret / Yenile", key=f"rup_{fac_id}_{period}_{sab_id}"):
+                try:
+                    with st.spinner("Şablon tesis verilerinizle dolduruluyor..."):
+                        cik = raporlar.rapor_uretim(sab_id, tesis, sonuc, prefs)
+                    save_report(fac_id, period, sab_id, cik["metin"], tip=cik["tip"])
+                    st.toast("Rapor kaydedildi; profilinizde 🔎 aylara göre görebilirsiniz.")
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Üretim başarısız: {e}")
+                    st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
+            kayit = get_report(fac_id, period, sab_id)
+            if kayit:
+                st.markdown(kayit["metin"])
+                c1, c2 = st.columns(2)
+                with c1:
+                    try:
+                        st.download_button(
+                            "⬇️ PDF",
+                            data=raporlar.rapor_pdf(kayit["metin"]),
+                            file_name=f"KarbonAT_{sab_id}_{period}.pdf",
+                            mime="application/pdf",
+                            key=f"rapdf_{fac_id}_{period}_{sab_id}",
+                            use_container_width=True,
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        st.warning(f"PDF: {e}")
+                if sab["tip"] == "deterministik":
+                    with c2:
+                        try:
+                            xlsx = raporlar.rapor_uretim(sab_id, tesis, sonuc)["xlsx"]
+                            st.download_button(
+                                "📊 Excel",
+                                data=xlsx,
+                                file_name=f"KarbonAT_{sab_id}_{period}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"rapl_{fac_id}_{period}_{sab_id}",
+                                use_container_width=True,
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            st.warning(f"Excel: {e}")
+
+
+# ==============================================
 def adim_sonuc():
     st.markdown('<h1>📄 Karbon Ayak İzi Sonucu</h1>', unsafe_allow_html=True)
 
@@ -989,6 +1080,11 @@ def adim_sonuc():
 
     st.markdown("---")
 
+    # Raporlar (raporlama alt sistemi)
+    _rapor_karti(st.session_state.facility_id, period, r)
+
+    st.markdown("---")
+
     # İndirmeler
     st.markdown('<div class="section-title">📥 İndirmeler</div>', unsafe_allow_html=True)
     col_xls, col_pdf, col_yeni = st.columns(3)
@@ -1125,15 +1221,24 @@ def _icerik_karti(fac_id, tur):
     save_content_prefs(fac_id, tur_id, p)
 
     st.markdown("---")
-    st.button(
-        "🚧 Üret / İndir — Araştırma Aşamasında",
-        disabled=True,
+    aktif = st.button(
+        f"🚀 {tur['baslik']} Üret",
         use_container_width=True,
         key=f"uretim_{fac_id}_{tur_id}",
-        help=("İçerik şablonu hazır değil; araştırma tamamlanınca "
-              "(ileride AI destekli) buradan üretebileceksiniz."),
+        help="Tesis verileri + tercihlerin + TGA şablon referansları (RAG) ile AI içeriği üretir.",
     )
-    st.caption("Bu içerik türü şu an devre dışı. Tercihleriniz kaydedildi ve üretime hazır.")
+    if aktif:
+        tesis = st.session_state.tesis
+        sonuc = st.session_state.sonuc
+        if not ai_engine.kbs_var_mi():
+            st.info("Bilgi bankası (data/kb.json) yok. `python kb_build.py` ile oluştur. RAG'sız yine de üretilecek.")
+        try:
+            with st.spinner("AI içeriği üretiliyor..."):
+                markdown = ai_engine.uretim_olustur(tur_id, tesis or {}, sonuc, p)
+            st.markdown(markdown)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Üretim başarısız: {e}")
+            st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kotaya takılırsa birkaç saniye sonra tekrar deneyin.")
 
 
 def adim_icerik():
@@ -1142,25 +1247,25 @@ def adim_icerik():
         st.warning("Önce bir tesis seçin.")
         return
 
-    st.markdown('<h1>🌿 İçerik Merkezi</h1>', unsafe_allow_html=True)
+    st.markdown('<h1>📣 Medya & İçerik</h1>', unsafe_allow_html=True)
     st.markdown(
         f'<div class="chip">🌿 {tesis["ad"]}</div>'
-        f'<div class="chip">🚧 Planlama Aşaması</div>',
+        f'<div class="chip">📣 Medya üretimi</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="banner">İçerik Merkezi, tek veri havuzunu farklı amaçlara dönüştüren '
-        '<strong>Content Engine</strong> mantığıyla çalışır: önce amacı seçin '
-        '(Raporlama · İletişim · Politikalar · Eğitim &amp; Anket), sonra tasarım tercihlerinizi '
-        'belirleyin. Şu anda <strong>planlama aşamasındayız</strong>: üretim kapalı; '
-        'tercihleriniz kaydediliyor, içerik araştırma tamamlanınca üretim aktifleşecek.</div>',
+        '<div class="banner"><strong>Medya &amp; İçerik</strong>: web sayfası, broşür, QR/oda kartı, '
+        'basın bülteni, sosyal medya, görsel/afiş, eğitim ve anket şablonları. '
+        '<strong>Raporlar</strong> (Tablo 1-13, politikalar) ayrıdır ve sonuç ekranında / profilinizde '
+        'yer alır. Her tür yalnızca kendi başlığına yönelik içerik üretir.</div>',
         unsafe_allow_html=True,
     )
 
-    # Amaca göre gruplar (AMAC_GRUPLARI); boş grup gösterilmez
+    # Amaca göre gruplar (AMAC_GRUPLARI); yalnız medya türleri gösterilir
     gruplar = []
     for g in AMAC_GRUPLARI:
-        turler = [t for t in ICERIK_TURLERI if t.get("grup") == g["id"]]
+        turler = [t for t in ICERIK_TURLERI
+                  if t.get("grup") == g["id"] and t.get("sistem") == "medya"]
         if not turler:
             continue
         gruplar.append({**g, "turler": turler})

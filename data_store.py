@@ -13,7 +13,7 @@ from datetime import datetime
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_FILE = os.path.join(DATA_DIR, "karbonat_db.json")
 
-DEFAULT_DB = {"kullanicilar": [], "tesisler": [], "kayitlar": {}, "icerik_tercihleri": {}}
+DEFAULT_DB = {"kullanicilar": [], "tesisler": [], "kayitlar": {}, "icerik_tercihleri": {}, "raporlar": {}}
 
 _SALT = "karbonat_p2_salt"
 
@@ -141,6 +141,7 @@ def delete_facility(fac_id):
     db["tesisler"] = [t for t in db.get("tesisler", []) if t["id"] != fac_id]
     db.get("kayitlar", {}).pop(fac_id, None)
     db.get("icerik_tercihleri", {}).pop(fac_id, None)
+    db.get("raporlar", {}).pop(fac_id, None)
     _save(db)
 
 
@@ -211,3 +212,38 @@ def save_content_prefs(fac_id, tur_id, prefs):
     d[tur_id] = p
     _save(db)
     return p
+
+
+# ---------------- RAPORLAR (dönem bazlı, profil→rapor→aylar) ----------------
+
+def list_report_periods(fac_id):
+    """Bu tesise ait en az bir AI/deterministik rapor kaydı olan dönemleri döner."""
+    db = _db()
+    return sorted(db.get("raporlar", {}).get(fac_id, {}).keys(), reverse=True)
+
+
+def get_report(fac_id, period, sablon_id):
+    """Belirli dönem + şablon için kayıtlı raporu döner (yoksa None)."""
+    db = _db()
+    return db.get("raporlar", {}).get(fac_id, {}).get(period, {}).get(sablon_id)
+
+
+def save_report(fac_id, period, sablon_id, metin, tip="ai"):
+    """Üretilen raporu kaydeder (aynı şablon/dönem varsa üzerine yazar)."""
+    db = _db()
+    donemler = db.setdefault("raporlar", {}).setdefault(fac_id, {})
+    kayit = {
+        "sablon_id": sablon_id,
+        "tip": tip,
+        "metin": metin,
+        "created": datetime.now().isoformat(timespec="seconds"),
+    }
+    donemler.setdefault(period, {})[sablon_id] = kayit
+    _save(db)
+    return kayit
+
+
+def get_saved_reports(fac_id, period):
+    """Belirli dönemdeki tüm kayıtlı raporları döner."""
+    db = _db()
+    return db.get("raporlar", {}).get(fac_id, {}).get(period, {})
