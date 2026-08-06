@@ -103,9 +103,18 @@ def _tesis_ozeti(tesis: dict, sonuc: dict | None) -> str:
         f"Atık bertarafı: {s.get('atik_bertaraf','belirtilmedi')}",
     ]
     en_agir = sonuc.get("en_agir") or {}
+    if isinstance(en_agir, dict):
+        en_agir = list(en_agir.items())
     if en_agir:
-        ilk = list(en_agir.items())[:2]
-        satirlar.append("En ağır kaynaklar: " + ", ".join(f"{k} %{v}" for k, v in ilk))
+        try:
+            ilk = en_agir[:2]
+            if isinstance(ilk[0], (list, tuple)) and len(ilk[0]) >= 3:
+                ozet = ", ".join(f"{k} (%{y})" for k, _, y in ilk)
+            else:
+                ozet = ", ".join(f"{k} %{v}" for k, v in ilk)
+            satirlar.append("En ağır kaynaklar: " + ozet)
+        except (TypeError, ValueError, IndexError):
+            pass
     return "\n".join(satirlar)
 
 
