@@ -109,6 +109,18 @@ ICERIK_TURLERI = [
         ),
     },
     {
+        "id": "gorsel_afis",
+        "grup": "iletisim",
+        "emoji": "🎨",
+        "baslik": "Görsel & Afiş",
+        "ciktilar": ["Poster", "Sosyal", "Kart"],
+        "aciklama": (
+            "Pazarlama görselleri için AI image-prompt üretici (Flux/Midjourney). Amaç, "
+            "hedef kitle, ton, görsel tema ve metin yönlendirmesi alır → görsel prompt "
+            "metni ve eşlik eden pazarlama metni üretir. Şimdilik iskelettir."
+        ),
+    },
+    {
         "id": "anket_misafir",
         "grup": "egitim_anket",
         "alt_grup": "anket",
@@ -186,6 +198,14 @@ ISKELETLER = {
         "Görsel alt yazıları",
         "Aylık içerik takvimi",
         "Green-claim uyarı notu (A6)",
+    ],
+    "gorsel_afis": [
+        "Ana kompozisyon — manzara, objeler, yerleşim (odak)",
+        "Renk paleti ve ışık / atmosfer",
+        "Metin & slogan yerleşimi (poster-sosyal-kart varyantları)",
+        "Stil rehberi (fotorealist / illüstrasyon / minimal-marka)",
+        "Amaç tarafına uyan örnek prompt + tesis verisi ekleme önerisi",
+        "Eşlik eden pazarlama alt yazısı (opsiyonel)",
     ],
     "politika": [
         "Amaç & Kapsam",
@@ -319,6 +339,33 @@ TURE_OZEL_SORULAR = {
             "secenekler": ["İstatistik paylaşımı", "Hikaye / arka plan", "Etkinlik duyurusu", "Karma"],
         },
     ],
+    "gorsel_afis": [
+        {
+            "anahtar": "format",
+            "soru": "Uygulama Formatı",
+            "secenekler": ["Poster (A3/A4)", "Sosyal medya (1:1 / 9:16 / 4:5)", "Oda kapı kartı"],
+        },
+        {
+            "anahtar": "stil",
+            "soru": "Görsel Stil",
+            "secenekler": ["Fotorealist", "Minimal / modern", "İllüstrasyon", "Otel markasına uyarlansın"],
+        },
+        {
+            "anahtar": "odak",
+            "soru": "Görsel Odak",
+            "secenekler": ["Doğa & çevre", "Tesis & otel", "İnsan & topluluk", "Veri / istatistik"],
+        },
+        {
+            "anahtar": "metin_var",
+            "soru": "Metin / Slogan",
+            "secenekler": ["Kısa slogan", "Başlık + alt başlık", "Metinsiz (saf görsel)"],
+        },
+        {
+            "anahtar": "tema",
+            "soru": "Renk Teması",
+            "secenekler": ["Orman (yeşil)", "Okyanus (mavi)", "Toprak (toprak tonlu)", "Minimal (monokrom)", "Marka uyumlu"],
+        },
+    ],
     "politika": [
         {
             "anahtar": "kapsam",
@@ -388,6 +435,7 @@ GENERATORLAR = {
     "egitim": None,
     "anket_misafir": None,
     "anket_personel": None,
+    "gorsel_afis": None,
 }
 
 # Görsel temalar (üretim aşamasında palete uygulanacak)

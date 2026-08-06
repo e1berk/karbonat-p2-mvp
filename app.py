@@ -198,6 +198,8 @@ def init_session():
         "sonuc": None,
         "history": [],
         "kategori_totallari": {},
+        "atik_bertaraf": "Geri dönüşüm + çöp (karışık)",
+        "yenilenebilir_oran": 30,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -332,7 +334,7 @@ def _tesis_ozet(t):
     return f'{t["m2"]} m² · {t["oda"]} oda · {t["personel"]} personel'
 
 
-def _hesapla(tesis, tuketim, musteri, dolu_oda_gun):
+def _hesapla(tesis, tuketim, musteri, dolu_oda_gun, atik_bertaraf="", yenilenebilir_oran=None):
     scope_data = hesapla_scope_ayrimi(tuketim)
     metrikler = hesapla_normalize_metrikler(
         scope_data["toplam"], tesis["m2"], tesis["oda"], tesis["personel"],
@@ -344,7 +346,13 @@ def _hesapla(tesis, tuketim, musteri, dolu_oda_gun):
     en_agir = en_agir_kaynaklar(scope_data["kategori_toplamlari"])
     return {
         "tesis": {**tesis, "musteri": musteri, "dolu_oda_gun": dolu_oda_gun},
-        "statik": {"atik_bertaraf": tesis["atik_bertaraf"], "yenilenebilir": tesis["yenilenebilir"]},
+        "statik": {
+            "atik_bertaraf": atik_bertaraf or tesis.get("atik_bertaraf", ""),
+            "yenilenebilir": (
+                tesis.get("yenilenebilir")
+                if yenilenebilir_oran is None else yenilenebilir_oran
+            ),
+        },
         "tuketim": tuketim,
         "scope": scope_data,
         "metrikler": metrikler,
@@ -505,22 +513,7 @@ def adim_tesis():
     with col4:
         personel = st.number_input("Personel sayısı", min_value=1, value=int(t.get("personel", 20)), step=5)
     with col5:
-        st.caption("Müşteri ve oda-gün sayıları aylık veri girişinde girilir.")
-
-    st.markdown('<div class="section-title">Sürdürülebilirlik Bağlamı</div>', unsafe_allow_html=True)
-    col6, col7 = st.columns(2)
-    with col6:
-        atik_secenek = ["Geri dönüşüm + çöp (karışık)", "Ağırlıklı geri dönüşüm", "Çoğunlukla çöp + kompost"]
-        atik_idx = t.get("atik_bertaraf_idx", 0)
-        if not isinstance(atik_idx, int) or not 0 <= atik_idx < len(atik_secenek):
-            atik_idx = 0
-        atik_bertaraf = st.selectbox("Ağırlıklı atık bertaraf yöntemi", atik_secenek, index=atik_idx)
-    with col7:
-        yenilenebilir = st.slider(
-            "Yenilenebilir elektrik oranı (%)", 0, 100,
-            value=int(t.get("yenilenebilir", 30)), step=5,
-            help="Şebeke elektriğinin YEK-G sertifikalı (yenilenebilir) kısmı",
-        )
+        st.caption("Müşteri, oda-gün, atık bertarafı ve yenilenebilir oranı aylık veri girişinde girilir.")
 
     st.markdown("---")
     col_back, col_next = st.columns([1, 2])
@@ -536,9 +529,6 @@ def adim_tesis():
                 "m2": int(m2),
                 "oda": int(oda),
                 "personel": int(personel),
-                "atik_bertaraf": atik_bertaraf,
-                "atik_bertaraf_idx": atik_secenek.index(atik_bertaraf),
-                "yenilenebilir": yenilenebilir,
             }
             if st.session_state.facility_id:
                 tesis["id"] = st.session_state.facility_id
@@ -551,8 +541,74 @@ def adim_tesis():
 
 
 # ==============================================
-# ADIM 2 - AYLIK VERİ (TABLO BAZLI GİRİŞ)
+# ADIM 2 - AYLIK VERİ (KART BAZLI GİRİŞ)
 # ==============================================
+# A1 sadeleştirme: aylık özel alanlar (atik bertaraf, yenilenebilir oranı)
+ATIK_BERTARAF_SECENEKLERI = [
+    "Geri dönüşüm + çöp (karışık)",
+    "Ağırlıklı geri dönüşüm",
+    "Çoğunlukla çöp + kompost",
+]
+
+
+def _eski_bertaraf(tesis, mevcut, onceki):
+    """Backward compat: tesis dict'inden ya da eski kayıttan."""
+    if mevcut and mevcut.get("atik_bertaraf"):
+        return mevcut["atik_bertaraf"]
+    if mevcut and mevcut.get("atik_bertaraf_idx") is not None:
+        idx = mevcut["atik_bertaraf_idx"]
+        if 0 <= idx < len(ATIK_BERTARAF_SECENEKLERI):
+            return ATIK_BERTARAF_SECENEKLERI[idx]
+    if tesis.get("atik_bertaraf"):
+        return tesis["atik_bertaraf"]
+    if onceki and onceki.get("atik_bertaraf"):
+        return onceki["atik_bertaraf"]
+    return ATIK_BERTARAF_SECENEKLERI[0]
+
+
+def _eski_yenilenebilir(tesis, mevcut, onceki):
+    for src in (mevcut, onceki, tesis):
+        if src and src.get("yenilenebilir_oran") is not None:
+            return int(src["yenilenebilir_oran"])
+        if src and src.get("yenilenebilir") is not None:
+            return int(src["yenilenebilir"])
+    return 30
+
+
+def _kategori_kart(kategori, tuketim, period):
+    """Bir kategori için alt tür kartları (2 kolon)."""
+    alt_turler = EMISSION_FACTORS.get(kategori, {})
+    birim = KATEGORI_BIRIM.get(kategori, "")
+    cols = st.columns(2)
+    yeni = {}
+    for i, alt in enumerate(alt_turler.items()):
+        ad, ef = alt
+        col = cols[i % 2]
+        with col:
+            st.markdown(f'<div class="data-card" style="padding:14px 16px; margin:6px 0;">', unsafe_allow_html=True)
+            st.markdown(
+                f'<div style="display:flex; justify-content:space-between; align-items:baseline;">'
+                f'<span style="font-weight:700; font-size:14px;">{ad}</span>'
+                f'<span class="chip" style="font-size:10px; margin:0;">{birim}</span>'
+                f'</div>'
+                f'<div style="font-size:11px; color:{MUTED}; margin-top:2px;">EF: {ef} kgCO₂e/{birim}</div>',
+                unsafe_allow_html=True,
+            )
+            mevcut_deger = float(tuketim.get(kategori, {}).get(ad, 0.0))
+            yeni_deger = st.number_input(
+                "Miktar",
+                min_value=0.0,
+                step=1.0,
+                value=mevcut_deger,
+                key=f"veri_{period}_{kategori}_{ad}",
+                label_visibility="collapsed",
+                format="%.2f",
+            )
+            yeni[ad] = yeni_deger
+            st.markdown('</div>', unsafe_allow_html=True)
+    return yeni
+
+
 def adim_veri():
     tesis = st.session_state.tesis
     st.markdown(f'<h1>📊 Aylık Veri Girişi</h1>', unsafe_allow_html=True)
@@ -593,7 +649,7 @@ def adim_veri():
             unsafe_allow_html=True,
         )
 
-    # Tuketim verisini yükle: kayıt varsa ondan, önceki dönemden, yoksa sıfır
+    # Tuketim + aylık alanlar
     if "_load_period" not in st.session_state or st.session_state._load_period != secilen:
         base = None
         if mevcut:
@@ -608,6 +664,8 @@ def adim_veri():
         st.session_state.tuketim = tuk
         st.session_state.musteri = mevcut["musteri"] if mevcut else (onceki["musteri"] if onceki else 0)
         st.session_state.dolu_oda_gun = mevcut["dolu_oda_gun"] if mevcut else (onceki["dolu_oda_gun"] if onceki else 0)
+        st.session_state.atik_bertaraf = _eski_bertaraf(tesis, mevcut, onceki)
+        st.session_state.yenilenebilir_oran = _eski_yenilenebilir(tesis, mevcut, onceki)
         st.session_state._load_period = secilen
 
     tuketim = st.session_state.tuketim
@@ -616,13 +674,16 @@ def adim_veri():
     st.markdown('<div class="section-title">🛏️ Bu Ayki Operasyon</div>', unsafe_allow_html=True)
     col_m, col_d = st.columns(2)
     with col_m:
-        musteri = st.number_input("Müşteri sayısı (konaklayan kişi)", min_value=0, step=10,
-                                  value=int(st.session_state.musteri),
-                                  help="Örn: 1 aile = 4 kişi")
+        musteri = st.number_input(
+            "Müşteri sayısı (konaklayan kişi)", min_value=0, step=10,
+            value=int(st.session_state.musteri), help="Örn: 1 aile = 4 kişi",
+        )
     with col_d:
-        dolu_oda_gun = st.number_input("Satılan oda-gün sayısı", min_value=0, step=50,
-                                       value=int(st.session_state.dolu_oda_gun),
-                                       help="Toplam oda × doluluk × gün (HCMI)")
+        dolu_oda_gun = st.number_input(
+            "Satılan oda-gün sayısı", min_value=0, step=50,
+            value=int(st.session_state.dolu_oda_gun),
+            help="Toplam oda × doluluk × gün (HCMI)",
+        )
     st.session_state.musteri = musteri
     st.session_state.dolu_oda_gun = dolu_oda_gun
 
@@ -645,28 +706,41 @@ def adim_veri():
             if aciklama:
                 st.caption(aciklama)
 
-            df = _kategori_df(kat, tuketim)
-            edited = st.data_editor(
-                df,
-                key=f"ed_{secilen}_{kat}",
-                hide_index=True,
-                num_rows="fixed",
-                disabled=["Alt Tür", "Emisyon Faktörü", "Emisyon (kg)"],
-                column_config={
-                    "Alt Tür": st.column_config.TextColumn("Alt Tür", width="large"),
-                    "Miktar": st.column_config.NumberColumn(
-                        f"Miktar ({KATEGORI_BIRIM.get(kat, '')})",
-                        min_value=0.0, step=1.0, format="%.2f"),
-                    "Emisyon Faktörü": st.column_config.NumberColumn("EF", format="%.3f"),
-                    "Emisyon (kg)": st.column_config.NumberColumn("Emisyon (kg)", format="%.2f"),
-                },
-                use_container_width=True,
-            )
+            # Elektrik sekmesi: yenilenebilir oranı (opsiyonel)
+            if kat == "Elektrik":
+                st.markdown(
+                    f'<div class="data-card" style="padding:12px 14px; margin:6px 0;">',
+                    unsafe_allow_html=True,
+                )
+                st.session_state.yenilenebilir_oran = st.slider(
+                    "Yenilenebilir elektrik oranı (%)", 0, 100,
+                    value=int(st.session_state.yenilenebilir_oran),
+                    step=5,
+                    help="Şebeke elektriğinin YEK-G sertifikalı (yenilenebilir) kısmı. "
+                         "Boş bırakmak isterseniz 0 ayarlayın ya da alt türlerde "
+                         "'Şebeke (yenilenebilir YEK-G sertifikalı)' satırını kullanın.",
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
 
-            # edited -> tuketim'e yaz
-            tuketim[kat] = {}
-            for _, row in edited.iterrows():
-                tuketim[kat][row["Alt Tür"]] = float(row["Miktar"])
+            # Atık sekmesi: ağırlıklı bertaraf yöntemi
+            if kat == "Atık Yönetimi":
+                st.markdown(
+                    f'<div class="data-card" style="padding:12px 14px; margin:6px 0;">',
+                    unsafe_allow_html=True,
+                )
+                idx_bertaraf = (
+                    ATIK_BERTARAF_SECENEKLERI.index(st.session_state.atik_bertaraf)
+                    if st.session_state.atik_bertaraf in ATIK_BERTARAF_SECENEKLERI else 0
+                )
+                st.session_state.atik_bertaraf = st.selectbox(
+                    "Ağırlıklı atık bertaraf yöntemi",
+                    ATIK_BERTARAF_SECENEKLERI,
+                    index=idx_bertaraf,
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+
+            with st.expander(f"📦 {kat} tüketim kartları", expanded=False):
+                tuketim[kat] = _kategori_kart(kat, tuketim, secilen)
 
             kat_toplam = sum(
                 miktar * EMISSION_FACTORS[kat].get(alt, 0.0)
@@ -683,7 +757,11 @@ def adim_veri():
 
     # Canlı özet
     st.markdown('<div class="section-title">🧮 Canlı Özet</div>', unsafe_allow_html=True)
-    onizleme = _hesapla(tesis, tuketim, musteri, dolu_oda_gun)
+    onizleme = _hesapla(
+        tesis, tuketim, musteri, dolu_oda_gun,
+        atik_bertaraf=st.session_state.atik_bertaraf,
+        yenilenebilir_oran=st.session_state.yenilenebilir_oran,
+    )
     m = onizleme["metrikler"]
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Toplam", f"{m['toplam_ton']} ton CO₂e")
@@ -717,6 +795,8 @@ def adim_hesap():
             tesis, tuketim,
             st.session_state.musteri,
             st.session_state.dolu_oda_gun,
+            atik_bertaraf=st.session_state.atik_bertaraf,
+            yenilenebilir_oran=st.session_state.yenilenebilir_oran,
         )
         save_record({
             "fac_id": st.session_state.facility_id,
@@ -724,6 +804,9 @@ def adim_hesap():
             "musteri": st.session_state.musteri,
             "dolu_oda_gun": st.session_state.dolu_oda_gun,
             "tuketim": tuketim,
+            "atik_bertaraf": st.session_state.atik_bertaraf,
+            "atik_bertaraf_idx": ATIK_BERTARAF_SECENEKLERI.index(st.session_state.atik_bertaraf),
+            "yenilenebilir_oran": st.session_state.yenilenebilir_oran,
             "sonuc": sonuc,
         })
         st.session_state.history = list_records(st.session_state.facility_id)

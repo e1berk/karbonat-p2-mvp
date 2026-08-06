@@ -4,3 +4,6 @@ reportlab
 python-dotenv
 plotly
 openpyxl
+google-genai
+python-docx
+xlrd

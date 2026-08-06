@@ -1,0 +1,228 @@
+# ============================================
+# KarbonAT - AI Üretim Katmanı (A5)
+#
+# RAG (data/kb.json üzerinden kosinüs benzerliği) + Gemini üretimi.
+# Deterministik alanlar (hesap motoru, TGA tabloları, Excel/PDF)
+# burada DEVRE DIŞIDIR; AI yalnız anlatı/broşür/politika/sosyal/
+# anket/image-prompt metinleri üretir.
+#
+# Kullanım:
+#   python ai_engine.py --soru "atık yönetimi politikası"
+#   python ai_engine.py --uretim rapor
+#
+# Üretim modeli: GEMINI_MODEL ortam değişkeniyle ayarlanabilir;
+# yoksa fallback listesi sırayla denenir (kota hatalarında sıradakine geçer).
+# ============================================
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from icerik_hub import ISKELETLER, tur_bul, TURE_OZEL_SORULAR  # noqa: E402
+
+CAKTI_YOL = Path(__file__).parent / "data" / "kb.json"
+EMBED_MODEL = "gemini-embedding-001"
+
+# Sırayla denenir: ilk çalışan kullanılır (429 kota / 404 erişim hatasında geç)
+GEN_MODELS = [
+    os.environ.get("GEMINI_MODEL", ""),
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+]
+GEN_MODELS = [m for m in GEN_MODELS if m]
+
+
+# ---------------- İstemci ----------------
+def _client():
+    from google import genai
+
+    anahtar = os.environ.get("GEMINI_API_KEY", "")
+    if not anahtar:
+        raise RuntimeError("GEMINI_API_KEY .env içinde yok.")
+    return genai.Client(api_key=anahtar)
+
+
+# ---------------- RAG ----------------
+def _kosinus(a: list[float], b: list[float]) -> float:
+    skaler = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(x * x for x in b) ** 0.5
+    return skaler / (na * nb) if na and nb else 0.0
+
+
+def kbs_var_mi() -> bool:
+    return CAKTI_YOL.exists()
+
+
+def rag_sorgu(soru: str, k: int = 4) -> list[dict]:
+    """data/kb.json üzerinde kosinüs benzerliğiyle en ilgili chunk'ları döner."""
+    if not kbs_var_mi():
+        return []
+    with open(CAKTI_YOL, encoding="utf-8") as f:
+        kb = json.load(f)
+    if not kb.get("chunks"):
+        return []
+    c = _client()
+    r = c.models.embed_content(model=EMBED_MODEL, contents=soru)
+    sorgu_emb = r.embeddings[0].values
+    eslesmeler = []
+    for ch in kb["chunks"]:
+        benzerlik = _kosinus(sorgu_emb, ch["embedding"])
+        eslesmeler.append((benzerlik, ch))
+    eslesmeler.sort(key=lambda t: t[0], reverse=True)
+    return [
+        {"kaynak": ch["kaynak"], "benzerlik": round(b, 4), "metin": ch["metin"]}
+        for b, ch in eslesmeler[:k]
+    ]
+
+
+# ---------------- Tesis özeti (prompt için) ----------------
+def _tesis_ozeti(tesis: dict, sonuc: dict | None) -> str:
+    if not sonuc:
+        return (
+            f"Tesis: {tesis.get('ad','')} · {tesis.get('m2','?')} m² · "
+            f"{tesis.get('oda','?')} oda · {tesis.get('personel','?')} personel"
+        )
+    m = sonuc.get("metrikler", {})
+    s = sonuc.get("statik", {})
+    satirlar = [
+        f"Tesis: {tesis.get('ad','')} ({tesis.get('il','')}, {tesis.get('m2','?')} m², {tesis.get('oda','?')} oda, {tesis.get('personel','?')} personel)",
+        f"Toplam emisyon: {m.get('toplam_ton','?')} ton CO₂e",
+        f"Scope 1/2/3: {m.get('scope1_kg','?')} / {m.get('scope2_kg','?')} / {m.get('scope3_kg','?')} kg",
+        f"Dolu oda-gün başına: {m.get('oda_gun_kg','?')} kg",
+        f"m² başına: {m.get('m2_aylik_kg','?')} kg · müşteri başına: {m.get('musteri_kg','?')} kg",
+        f"Yenilenebilir enerji oranı: {s.get('yenilenebilir','?')}%",
+        f"Atık bertarafı: {s.get('atik_bertaraf','belirtilmedi')}",
+    ]
+    en_agir = sonuc.get("en_agir") or {}
+    if en_agir:
+        ilk = list(en_agir.items())[:2]
+        satirlar.append("En ağır kaynaklar: " + ", ".join(f"{k} %{v}" for k, v in ilk))
+    return "\n".join(satirlar)
+
+
+# ---------------- Üretim ----------------
+def uretim_olustur(
+    tur_id: str,
+    tesis: dict,
+    sonuc: dict | None,
+    prefs: dict,
+) -> str:
+    """İçerik türü için Gemini ile markdown çıktı üretir. RAG bağlamı kullanır."""
+    tur = tur_bul(tur_id)
+    if not tur:
+        raise ValueError(f"Bilinmeyen içerik türü: {tur_id}")
+
+    iskelet = ISKELETLER.get(tur_id, [])
+    iskelet_md = "\n".join(f"  {i}. {b}" for i, b in enumerate(iskelet, 1))
+
+    tercih_md = "\n".join(f"  • {k}: {v}" for k, v in prefs.items() if v not in ("", None))
+
+    tesis_md = _tesis_ozeti(tesis, sonuc)
+
+    rag = rag_sorgu(f"{tur['baslik']} {prefs.get('amac','')} {prefs.get('vurgu','')}", k=5)
+    if rag:
+        rag_md = "\n\n---\n\n".join(
+            f"[{r['kaynak']}]\n{r['metin']}" for r in rag
+        )
+    else:
+        rag_md = "(KB yok veya boş; şablon bilgisi RAG'sız kullanılacak.)"
+
+    prompt = f"""Sen KarbonAT'ın içerik üreticisisin; Türkiye'de GSTC/TGA uyumlu çalışan bir otelin sürdürülebilirlik içeriklerini yazıyorsun.
+
+GÖREV: "{tur['baslik']}" türünde markdown içerik üret.
+
+İÇERİK TÜRÜ AÇIKLAMASI:
+{tur.get('aciklama','')}
+
+TESİS VERİSİ (somut rakamları AYNEN kullan, uydurma):
+{tesis_md}
+
+İSTENEN YAPI (iskelet; her maddeyi doldur, alt başlıklarla markdown olarak):
+{iskelet_md}
+
+TASARIM TERCİHLERİ (bunlara uy):
+{tercih_md}
+
+REFERANS ŞABLONLAR (RAG; TGA'nın gerçek şablon/politika dili — bu dilden ve maddelerden ilham al, birebir kopyalama):
+{rag_md}
+
+KURALLAR:
+- Yalnız markdown çıktı, giriş cümlesi yok.
+- Rakipları/hukuk dili/yanlış iddia (green-claim) kullanma; somut veri yoksa genel ve temkinli yaz.
+- Türkçe (dil tercihi farklıysa ona uy).
+- İçerik uzunluğu: {prefs.get('uzunluk','Orta')}.
+- Ton: {prefs.get('ton','Kurumsal & Resmi')}. Hedef kitle: {prefs.get('hedef_kitle','Misafir')}.
+- Ek kullanıcı notu: {prefs.get('notlar','(yok)')}
+"""
+
+    c = _client()
+    hata = None
+    for model in GEN_MODELS:
+        try:
+            r = c.models.generate_content(
+                model=model,
+                contents=prompt,
+                config={"response_mime_type": "text/plain"},
+            )
+            metin = (r.text or "").strip()
+            if not metin:
+                raise RuntimeError("Boş yanıt")
+            return metin
+        except Exception as e:  # noqa: BLE001 — model fallback
+            hata = e
+            print(f"  ! {model} başarısız: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+    raise RuntimeError(f"Tüm üretim modelleri başarısız. Son hata: {hata}")
+
+
+def varsayilan_prefs():
+    return {
+        "amac": "Bilgilendirme", "hedef_kitle": "Misafir", "ton": "Kurumsal & Resmi",
+        "dil": "Türkçe", "vurgu": "Çevre & İklim", "uzunluk": "Orta",
+        "tema": "orman", "notlar": "",
+    }
+
+
+if __name__ == "__main__":
+    import argparse
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # noqa: SIM115 — konsol Türkçe/emoji güvenliği
+    except Exception:  # noqa: BLE001
+        pass
+    ap = argparse.ArgumentParser(description="KarbonAT AI katmanı testi")
+    ap.add_argument("--soru", help="RAG sorgu testi")
+    ap.add_argument("--uretim", help="İçerik türü üretim testi (örn. rapor)")
+    args = ap.parse_args()
+
+    if args.soru:
+        sonuclar = rag_sorgu(args.soru, k=4)
+        print(f"{len(sonuclar)} sonuç:")
+        for r in sonuclar:
+            print(f"\n[{r['kaynak']} | {r['benzerlik']}]")
+            print(r["metin"][:220])
+    elif args.uretim:
+        ornek_tesis = {
+            "ad": "Örnek Tatil Köyü", "il": "Antalya", "m2": 18000,
+            "oda": 220, "personel": 180, "musteri": 1200, "dolu_oda_gun": 48000,
+        }
+        ornek_sonuc = {
+            "metrikler": {
+                "toplam_ton": 1240.5, "scope1_kg": 420000, "scope2_kg": 780000,
+                "scope3_kg": 40500, "oda_gun_kg": 25.8, "m2_aylik_kg": 68.9,
+                "musteri_kg": 1033.75,
+            },
+            "statik": {"atik_bertaraf": "Düzenli depolama", "yenilenebilir": 32},
+            "en_agir": {"elektrik": 45, "doğalgaz": 30},
+        }
+        print(uretim_olustur(args.uretim, ornek_tesis, ornek_sonuc, varsayilan_prefs()))
+    else:
+        ap.print_help()
