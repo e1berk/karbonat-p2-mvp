@@ -248,7 +248,17 @@ def markdown_bloklar(metin: str) -> list[tuple]:
             rows = [r for r in rows if not all(set(c) <= {"-", ":", " "} for c in r)]
             rows = [r for r in rows if any(r)]
             if len(rows) >= 2:
-                df = pd.DataFrame(rows[1:], columns=rows[0])
+                cols = []
+                gorulen = set()
+                for i, c in enumerate(rows[0]):
+                    ad = c.strip()
+                    if not ad:
+                        ad = f"Sütun {i + 1}"
+                    if ad in gorulen:
+                        ad = f"{ad} ({i + 1})"
+                    gorulen.add(ad)
+                    cols.append(ad)
+                df = pd.DataFrame(rows[1:], columns=cols)
                 bloklar.append(("tablo", df))
             elif rows:
                 bloklar.append(("md", rows[0][0]))
