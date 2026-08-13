@@ -174,6 +174,13 @@ st.markdown(f"""
     /* ===== FORM ===== */
     .stTextInput input, .stNumberInput input, .stDateInput input {{
         border-radius: 10px; border: 1px solid var(--border);
+        background: #fff; color: var(--ink);
+    }}
+    .stTextInput label, .stNumberInput label, .stDateInput label {{
+        color: var(--ink) !important;
+    }}
+    [data-testid="stTextInputRootElement"] {{
+        background: #fff; color: var(--ink);
     }}
     .stExpander {{ background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 8px; }}
     .stTabs [data-baseweb="tab-list"] {{ gap: 6px; }}
@@ -399,7 +406,7 @@ def auth_screen():
             options=["🔑 Giriş Yap", "✨ Kayıt Ol"],
             default="🔑 Giriş Yap",
             key="auth_mode",
-            label_visibility="collapsed",
+            label_visibility="hidden",
         )
 
         if secim == "🔑 Giriş Yap":
@@ -633,7 +640,7 @@ def _kategori_kart(kategori, tuketim, period):
                 step=1.0,
                 value=mevcut_deger,
                 key=f"veri_{period}_{kategori}_{ad}",
-                label_visibility="collapsed",
+                label_visibility="hidden",
                 format="%.2f",
             )
             yeni[ad] = yeni_deger
@@ -911,7 +918,7 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
         options=["✏️ Düzenle", "👁 Önizleme"],
         default="✏️ Düzenle",
         key=mod_key,
-        label_visibility="collapsed",
+        label_visibility="hidden",
     )
 
     if mod == "✏️ Düzenle":
