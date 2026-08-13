@@ -7,3 +7,4 @@ openpyxl
 google-genai
 python-docx
 xlrd
+Pillow
