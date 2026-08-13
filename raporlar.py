@@ -250,12 +250,12 @@ def markdown_bloklar(metin: str) -> list[tuple]:
             if len(rows) >= 2:
                 cols = []
                 gorulen = set()
-                for i, c in enumerate(rows[0]):
+                for j, c in enumerate(rows[0]):
                     ad = c.strip()
                     if not ad:
-                        ad = f"Sütun {i + 1}"
+                        ad = f"Sütun {j + 1}"
                     if ad in gorulen:
-                        ad = f"{ad} ({i + 1})"
+                        ad = f"{ad} ({j + 1})"
                     gorulen.add(ad)
                     cols.append(ad)
                 df = pd.DataFrame(rows[1:], columns=cols)

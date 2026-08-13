@@ -31,14 +31,16 @@ CAKTI_YOL = Path(__file__).parent / "data" / "kb.json"
 EMBED_MODEL = "gemini-embedding-001"
 
 # Sırayla denenir: ilk çalışan kullanılır (429 kota / 404 erişim hatasında geç).
-# Not: "gemini-2.5-flash" genel takma adı yeni kullanıcılara kapalıdır (404),
-# bu yüzden liste sürümlü/kararlı adlardan oluşur.
+# Yeni anahtarla (Ağu 2026) test edilmiş gerçek ücretsiz metin modelleri:
+#   gemini-3.7-flash ✅, gemini-3.6-flash ✅ (iki de çalıştı, canlı doğrulandı).
+#   gemini-2.5-flash(-lite) / -001 sürümleri yeni kullanıcılara 404 veriyor (kapalı).
+# "gemini-2.5-pro" ücretsiz katmanda yok (her zaman "limit: 0" 429).
+# Not: models.list()'te görünen ancak test edilmemiş adaylar (3.5-flash,
+# 3.1-flash-lite, flash-latest) ileride kota dolduğunda faydalı olursa eklenebilir.
 GEN_MODELS = [
     os.environ.get("GEMINI_MODEL", ""),
-    "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash-lite-001",
-    "gemini-2.5-pro",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
 ]
 GEN_MODELS = [m for m in GEN_MODELS if m]
 
