@@ -248,6 +248,8 @@ def markdown_bloklar(metin: str) -> list[tuple]:
             rows = [r for r in rows if not all(set(c) <= {"-", ":", " "} for c in r)]
             rows = [r for r in rows if any(r)]
             if len(rows) >= 2:
+                ncols = max(len(r) for r in rows)
+                rows = [r[:ncols] + [""] * (ncols - len(r)) for r in rows]
                 cols = []
                 gorulen = set()
                 for j, c in enumerate(rows[0]):
