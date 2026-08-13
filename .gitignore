@@ -3,10 +3,12 @@ __pycache__/
 *.py[cod]
 
 # Uygulama verisi (kullanıcı kayıtları yerelde saklanır, repo'ya gitmez)
-data/
+# Not: data/kb.json (RAG bilgi bankası - seed) repo'da tutulur; kullanıcı
+# kayıtları (karbonat_db.json) gitmez.
+data/karbonat_db.json
 
-# Streamlit
-.streamlit/
+# Streamlit - lokal kullanıcı secrets'ı repo'ya gitmez, tema config'ı gider
+.streamlit/secrets.toml
 
 # Sistem
 Thumbs.db
