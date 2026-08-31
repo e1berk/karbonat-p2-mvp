@@ -195,12 +195,26 @@ def save_green_report(sonuc, period="", onceki=None):
     c.setFont(FONT_BOLD, 9)
     c.drawRightString(width - 1.5 * cm, height - 1.7 * cm, "KarbonAT P2")
 
+    # Boş veri kontrolü — demo için anlamlı mesaj
+    _toplam_tuketim = sum(v for kat in tuketim.values() for v in kat.values()) if isinstance(tuketim, dict) else 0
+    _is_bos = (metrik.get("toplam_kg", 0) == 0 and _toplam_tuketim == 0)
+
     y = height - 4.6 * cm
 
     # ===== TAZE İDDİA BANDI (A6: veriye dayalı) =====
     toplam_kg = metrik["toplam_kg"]
     toplam_ton = metrik["toplam_ton"]
     kisi_basi = metrik.get("musteri_kg", 0)
+
+    if _is_bos:
+        c.setFillColor(HexColor("#fff3cd"))
+        c.rect(1.5*cm, y - 0.6*cm, width - 3*cm, 0.9*cm, fill=1, stroke=0)
+        c.setFillColor(HexColor("#856404"))
+        c.setFont(FONT_BOLD, 9)
+        c.drawString(2.0*cm, y - 0.15*cm, "Veri bekleniyor — bu tesis/dönem için henüz tüketim girilmemiş.")
+        c.setFont(FONT_REG, 7.5)
+        c.drawString(2.0*cm, y - 0.42*cm, "Veri Girişinde 'Kapasiteye göre örnek veriyle doldur' butonuna basın, sonra tekrar PDF alın.")
+        y -= 1.1*cm
 
     c.setFillColor(CREAM)
     c.rect(1.5 * cm, y - 0.4 * cm, width - 3 * cm, 1.6 * cm, fill=1, stroke=0)
