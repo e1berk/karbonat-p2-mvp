@@ -248,6 +248,9 @@ def _rag_filtreli(soru: str, terimler: list[str], k: int = 4) -> list[dict]:
 
 def _is_retryable(e: Exception) -> bool:
     s = str(e).lower()
+    # Günlük kota (PerDay) asla retry ile düzelmez — hemen diğer modele geç, bekleme yapma
+    if "perday" in s or "per_day" in s or "perdayperproject" in s:
+        return False
     if "429" in s or "resource_exhausted" in s or "quota" in s or "retry" in s or "unavailable" in s or "deadline" in s or "500" in s or "503" in s:
         return True
     if "400" in s or "403" in s or "401" in s or "invalid" in s or "not found" in s or "404" in s:
