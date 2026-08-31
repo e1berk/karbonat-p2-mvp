@@ -13,18 +13,66 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.colors import HexColor
 from reportlab.lib.utils import simpleSplit
 
-from tga_tables import format_donem, tablo10_elektrik, tablo12_su, tablo13_atik
+from tga_tables import format_donem, tablo10_elektrik, tablo11_enerji, tablo12_su, tablo13_atik
 
-# Font yükleme (Windows Arial - Türkçe karakterler)
+# Font yükleme (önce tedarik edilmiş Roboto, sonra Windows Arial, sonrası Helvetica)
 FONT_REG = 'Helvetica'
 FONT_BOLD = 'Helvetica-Bold'
-try:
-    pdfmetrics.registerFont(TTFont('Arial', r'C:\Windows\Fonts\arial.ttf'))
-    pdfmetrics.registerFont(TTFont('Arial-Bold', r'C:\Windows\Fonts\arialbd.ttf'))
-    FONT_REG = 'Arial'
-    FONT_BOLD = 'Arial-Bold'
-except Exception as e:
-    print(f"Arial yüklenemedi, Helvetica'ye düşüldü: {e}")
+
+def _yukle_font():
+    """Roboto font'u tedarik edilen yollardan yükler (Linux/Mac/Windows)."""
+    import os as _os
+    candidate_dirs = [
+        _os.path.join(_os.path.dirname(_os.path.abspath(__file__))),  # projekökü
+        _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data"),
+    ]
+    if _os.name == "nt":
+        candidate_dirs.append(r"C:\Windows\Fonts")
+    candidate_dirs.append("/usr/share/fonts")
+    candidate_dirs.append("/usr/local/share/fonts")
+
+    regular_paths = ["Roboto-Regular.ttf", "roboto/Roboto-Regular.ttf"]
+    bold_paths = ["Roboto-Bold.ttf", "Roboto-Bold.otf", "roboto/Roboto-Bold.ttf"]
+
+    def _bul(yol_listesi):
+        for d in candidate_dirs:
+            for alt in yol_listesi:
+                p = _os.path.join(d, alt)
+                if _os.path.isfile(p):
+                    return p
+        return None
+
+    reg_p = _bul(regular_paths)
+    bold_p = _bul(bold_paths)
+
+    if reg_p:
+        try:
+            pdfmetrics.registerFont(TTFont('Roboto', reg_p))
+            pdfmetrics.registerFontFamily('Roboto', normal='Roboto', bold='Roboto', italic='Roboto', boldItalic='Roboto')
+            if bold_p:
+                try:
+                    pdfmetrics.registerFont(TTFont('Roboto-Bold', bold_p))
+                    pdfmetrics.registerFontFamily('Roboto-Bold', normal='Roboto', bold='Roboto-Bold', italic='Roboto-Bold', boldItalic='Roboto-Bold')
+                    return 'Roboto', 'Roboto-Bold'
+                except Exception as e:
+                    print(f"Roboto Bold yuklenemedi, normal kullanilacak: {e}")
+                    return 'Roboto', 'Roboto'
+            return 'Roboto', 'Roboto'
+        except Exception as e:
+            print(f"Roboto yuklenemedi: {e}")
+
+    # Arial fallback (Windows)
+    if _os.name == "nt":
+        try:
+            pdfmetrics.registerFont(TTFont('Arial', r'C:\Windows\Fonts\arial.ttf'))
+            pdfmetrics.registerFont(TTFont('Arial-Bold', r'C:\Windows\Fonts\arialbd.ttf'))
+            return 'Arial', 'Arial-Bold'
+        except Exception as e:
+            pass
+
+    return 'Helvetica', 'Helvetica-Bold'
+
+FONT_REG, FONT_BOLD = _yukle_font()
 
 PRIMARY = HexColor("#1b4332")
 ACCENT = HexColor("#2d6a4f")
@@ -72,14 +120,57 @@ def save_green_report(sonuc, period="", onceki=None):
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    tesis = sonuc["tesis"]
-    metrik = sonuc["metrikler"]
-    scope = sonuc["scope"]
-    en_agir = sonuc.get("en_agir", [])
-    tuketim = sonuc["tuketim"]
+    tesis = sonuc.get("tesis") or {"ad": "Tesis", "m2": 0, "oda": 0, "personel": 0, "musteri": 0, "dolu_oda_gun": 0}
+    metrik = sonuc.get("metrikler") or {"toplam_kg": 0, "toplam_ton": 0, "oda_gun_kg": 0, "m2_aylik_kg": 0, "musteri_kg": 0, "scope1_kg": 0, "scope2_kg": 0, "scope3_kg": 0}
+    scope = sonuc.get("scope") or {"scope1": 0, "scope2": 0, "scope3": 0, "toplam": 0}
+    _en = sonuc.get("en_agir", [])
+    # en_agir her türlü şekle karşı dayanıklı hale getir
+    en_agir = []
+    if isinstance(_en, dict):
+        # dict ise {kat: deger} şeklinde
+        try:
+            en_agir = [(k, float(v), 0) for k, v in _en.items()]
+        except Exception:
+            en_agir = []
+    elif isinstance(_en, (list, tuple)):
+        tmp = []
+        for el in _en:
+            if isinstance(el, (list, tuple)) and len(el) >= 2:
+                try:
+                    kat = str(el[0])
+                    deger = float(el[1]) if el[1] is not None else 0.0
+                    yuzde = float(el[2]) if len(el) > 2 and el[2] is not None else 0.0
+                    tmp.append((kat, deger, yuzde))
+                except Exception:
+                    continue
+            elif isinstance(el, dict):
+                try:
+                    for k, v in el.items():
+                        tmp.append((str(k), float(v), 0))
+                except Exception:
+                    continue
+        en_agir = tmp
+    tuketim = sonuc.get("tuketim") or {}
+
+    # onceki: hem record dict hem sonuc dict hem de bozuk int gelebilir — hepsini normalize et
+    if isinstance(onceki, dict) and "sonuc" in onceki and isinstance(onceki["sonuc"], dict):
+        onceki = onceki["sonuc"]
+    if not isinstance(onceki, dict):
+        onceki = {}
+    # tesis/metrik/scope int gelirse dict'e çevir
+    if not isinstance(tesis, dict):
+        tesis = {"ad": str(tesis) if tesis else "Tesis", "m2": 0, "oda": 0, "personel": 0, "musteri": 0, "dolu_oda_gun": 0}
+    if not isinstance(metrik, dict):
+        metrik = {"toplam_kg": 0, "toplam_ton": 0, "oda_gun_kg": 0, "m2_aylik_kg": 0, "musteri_kg": 0, "scope1_kg": 0, "scope2_kg": 0, "scope3_kg": 0}
+    if not isinstance(scope, dict):
+        scope = {"scope1": 0, "scope2": 0, "scope3": 0, "toplam": 0}
+    if not isinstance(tuketim, dict):
+        tuketim = {}
 
     donem = format_donem(period)
-    onceki_metrik = (onceki or {}).get("metrikler")
+    onceki_metrik = onceki.get("metrikler") if isinstance(onceki, dict) else None
+    if not isinstance(onceki_metrik, dict):
+        onceki_metrik = None
 
     # ===== BAŞLIK =====
     c.setFillColor(PRIMARY)
@@ -150,6 +241,8 @@ def save_green_report(sonuc, period="", onceki=None):
     y -= 0.75 * cm
 
     def _kaynak_toplami(kategori):
+        if isinstance(kategori, dict):
+            return sum(v for v in kategori.values() if v and v > 0)
         return sum(v for v in tuketim.get(kategori, {}).values() if v and v > 0)
 
     su_m3 = _kaynak_toplami("Su")
@@ -163,7 +256,13 @@ def save_green_report(sonuc, period="", onceki=None):
         if toplam_atik > 0:
             geri_oran = geri / toplam_atik * 100
 
-    onceki_su = _kaynak_toplami((onceki or {}).get("tuketim", {}).get("Su", {})) if onceki else 0
+    _onceki_tuk = onceki.get("tuketim", {}) if isinstance(onceki, dict) else {}
+    if not isinstance(_onceki_tuk, dict):
+        _onceki_tuk = {}
+    _onceki_su_dict = _onceki_tuk.get("Su", {})
+    if not isinstance(_onceki_su_dict, dict):
+        _onceki_su_dict = {}
+    onceki_su = _kaynak_toplami(_onceki_su_dict) if onceki else 0
 
     gosterge_rows = [
         ("CO₂ / Misafir", f"{metrik['musteri_kg']} kg/misafir",
@@ -263,53 +362,171 @@ def save_green_report(sonuc, period="", onceki=None):
     c.showPage()
     y = height - 2.5 * cm
 
-    # ===== 2. SAYFA: TGA TAKİP TABLOLARI =====
+    # ===== 2. SAYFA: YÖNETİCİ ÖZETİ & YOL HARİTASI (ön analiz) =====
     c.setFillColor(PRIMARY)
     c.setFont(FONT_BOLD, 15)
-    c.drawString(1.5 * cm, y, "TGA Takip Tabloları (Veri Kaydı)")
-    y -= 0.7 * cm
+    c.drawString(1.5 * cm, y, "Yönetici Özeti & Yol Haritası")
+    y -= 0.55 * cm
     c.setFillColor(LIGHT)
-    c.setFont(FONT_REG, 9)
-    c.drawString(1.5 * cm, y, "Aşağıdaki tablolar TGA Tablo 10-13 formatına uygun olarak üretilmiştir.")
-    y -= 0.8 * cm
+    c.setFont(FONT_REG, 8.5)
+    for line in simpleSplit("Bu sayfa ilk sayfanın ön analizi niteliğindedir. TGA Tablo 10-13 ham verileri denetime hazır Excel ekinde sunulur; burada yalnızca özet ve aksiyon önerileri yer alır.", FONT_REG, 8.5, width - 3*cm):
+        c.drawString(1.5 * cm, y, line)
+        y -= 0.34 * cm
+    y -= 0.2 * cm
 
-    tablolar = [
-        ("Tablo 10 - Elektrik Tüketimi", tablo10_elektrik(tuketim), ["Alt Tür", "Tüketim (kWh)", "Emisyon (kgCO₂e)"]),
-        ("Tablo 12 - Su Sarfiyatı", tablo12_su(tuketim, tesis.get("dolu_oda_gun", 0), tesis.get("musteri", 0)), ["Kaynak", "Tüketim (m³)", "Oda-Gün Başına (L)"]),
-        ("Tablo 13 - Katı Atık", tablo13_atik(tuketim), ["Atık Türü", "Miktar (kg)", "Emisyon (kgCO₂e)"]),
-    ]
+    # --- Bu ayın hikayesi (2 cumle) ---
+    hikaye = f"{tesis['ad']} bu ay {toplam_ton} ton CO₂e üretti. "
+    if onceki_metrik and onceki_metrik.get("toplam_kg"):
+        delta = (metrik["toplam_kg"] - onceki_metrik["toplam_kg"]) / onceki_metrik["toplam_kg"]*100
+        yon = "azalış" if delta < 0 else "artış"
+        hikaye += f"Geçen aya göre %{abs(delta):.1f} {yon} var. "
+    if en_agir:
+        ilk = en_agir[0]
+        # en_agir tuple (kat,deger,yuzde)
+        kat0 = ilk[0] if isinstance(ilk, (list,tuple)) else str(ilk)
+        hikaye += f"En büyük pay {kat0} kaynaklı."
+    c.setFillColor(CREAM)
+    c.rect(1.5*cm, y - 1.15*cm, width -3*cm, 1.35*cm, fill=1, stroke=0)
+    c.setFillColor(ACCENT)
+    c.rect(1.5*cm, y - 1.15*cm, 0.14*cm, 1.35*cm, fill=1, stroke=0)
+    c.setFillColor(INK)
+    c.setFont(FONT_REG, 8.5)
+    ty = y - 0.35*cm
+    for line in simpleSplit(hikaye, FONT_REG, 8.5, width - 4*cm):
+        c.drawString(2.05*cm, ty, line)
+        ty -= 0.33*cm
+        if ty < 3*cm:
+            break
+    y -= 1.6*cm
 
-    for baslik, df, cols in tablolar:
-        if y < 4 * cm:
+    # --- Önerilen aksiyonlar (en_agir'a göre) ---
+    c.setFillColor(PRIMARY)
+    c.setFont(FONT_BOLD, 11)
+    c.drawString(1.5*cm, y, "Öncelikli Aksiyon Önerileri")
+    y -= 0.5*cm
+    # Harita: kategori -> öneri
+    ONERI_HARITA = {
+        "Elektrik": "LED & sensör dönüşümü, YEK-G sertifikalı tedarik, çatı PV fizibilitesi",
+        "Doğal Gaz": "Kazan verimliliği, ısı geri kazanım, yalıtım kontrolü",
+        "Su": "Akıllı sayaç, havuz sızıntı kontrolü, misafir bilgilendirme kartı",
+        "Atık": "Kaynağında ayrıştırma kutuları, personel eğitimi, tartım fişi rutini",
+        "Gıda": "Yerel/m evsimsel menü, porsiyon optimizasyonu, atık tartımı",
+        "Kimyasal": "Konsantre/dozlama sistemi, eko-etiketli ürün geçişi",
+        "Soğutucu": "Kaçak kontrol, düşük GWP gaz geçişi, bakım logu",
+        "Araç": "Rota optimizasyonu, filo bakımı, toplu transfer teşviki",
+    }
+    aksiyonlar = []
+    for kat, _, _ in (en_agir[:3] if en_agir else []):
+        # kategori adından anahtar bul
+        ana = next((k for k in ONERI_HARITA if k.lower() in kat.lower()), None)
+        if ana:
+            aksiyonlar.append(f"{kat}: {ONERI_HARITA[ana]}")
+        else:
+            aksiyonlar.append(f"{kat}: Ölçüm sıklığını artır, sapmayı haftalık izle")
+    if not aksiyonlar:
+        aksiyonlar = ["Veri girişini düzenli yap – 12 ay trendi otomatik oluşur.", "Tablo 6 ekip sorumluluklarını aylık gözden geçir.", "Misafir anketini (Tablo5) aktif tut."]
+    for idx, met in enumerate(aksiyonlar, 1):
+        if y < 3.5*cm:
             c.showPage()
-            y = height - 2.5 * cm
+            y = height - 2.5*cm
+            _kaydet(c, width)
+        c.setFillColor(HexColor("#f6faf7"))
+        c.rect(1.5*cm, y -0.22*cm, width-3*cm, 0.68*cm, fill=1, stroke=0)
         c.setFillColor(ACCENT)
-        c.setFont(FONT_BOLD, 11)
-        c.drawString(1.5 * cm, y, baslik)
-        y -= 0.5 * cm
-
-        rows = []
-        if not df.empty:
-            rows = df[[c for c in df.columns if c in cols]].tail(8).values.tolist()
-
-        c.setFillColor(PRIMARY)
-        c.setFont(FONT_BOLD, 8)
-        for j, col in enumerate(cols):
-            x = 1.5 * cm + j * ((width - 3 * cm) / len(cols))
-            c.drawString(x, y, col)
-        y -= 0.35 * cm
-
+        c.setFont(FONT_BOLD, 8.5)
+        c.drawString(1.7*cm, y+0.12*cm, f"{idx}.")
         c.setFillColor(INK)
-        c.setFont(FONT_REG, 8)
-        for r in rows:
-            if y < 2 * cm:
+        c.setFont(FONT_REG, 8.2)
+        # wrap
+        lines = simpleSplit(met, FONT_REG, 8.2, width-4.2*cm)
+        c.drawString(2.1*cm, y+0.12*cm, lines[0] if lines else met)
+        if len(lines) > 1:
+            c.drawString(2.1*cm, y-0.16*cm, lines[1])
+        y -= 0.82*cm
+    y -= 0.15*cm
+
+    # --- Kompakt TGA özet tabloları (3 mini tablo, header corpora) ---
+    # Basit manuel mini tablo cizimi – 3'er satir, sığar garantili
+    def _mini_tablo(baslik, df, cols, ypos):
+        if ypos < 4.2*cm:
+            c.showPage()
+            ypos = height - 2.5*cm
+            _kaydet(c, width)
+        c.setFillColor(ACCENT)
+        c.setFont(FONT_BOLD, 9)
+        c.drawString(1.5*cm, ypos, baslik)
+        ypos -= 0.45*cm
+        # header arkaplan
+        c.setFillColor(PRIMARY)
+        c.rect(1.5*cm, ypos-0.08*cm, width-3*cm, 0.48*cm, fill=1, stroke=0)
+        c.setFillColor(HexColor("#ffffff"))
+        c.setFont(FONT_BOLD, 7)
+        for j, col in enumerate(cols):
+            x = 1.5*cm + j*((width-3*cm)/len(cols))
+            c.drawString(x+0.08*cm, ypos+0.12*cm, col)
+        ypos -= 0.48*cm
+        # rows (max 3 + TOPLAM)
+        rows = []
+        if df is not None and not df.empty:
+            # TOPLAM hariç en büyük 2 + TOPLAM
+            tmp = df.copy()
+            # TOPLAM satiri sonda ise ayir
+            toplam_row = None
+            if not tmp.empty and str(tmp.iloc[-1].iloc[0]).upper() == "TOPLAM":
+                toplam_row = tmp.iloc[-1]
+                tmp = tmp.iloc[:-1]
+            # en büyük emisyon'a göre sırala (son sütun genelde emisyon)
+            try:
+                tmp = tmp.sort_values(tmp.columns[-1], ascending=False).head(2)
+            except Exception:
+                tmp = tmp.head(2)
+            if toplam_row is not None:
+                # birlestir
+                import pandas as pd
+                rows_df = pd.concat([tmp, toplam_row.to_frame().T], ignore_index=True)
+            else:
+                rows_df = tmp
+            for _, r in rows_df.iterrows():
+                rows.append([str(r[col]) if col in r else "" for col in cols])
+        # zebra rows
+        for ri, r in enumerate(rows):
+            if ypos < 2.2*cm:
                 c.showPage()
-                y = height - 2 * cm
+                ypos = height - 2.5*cm
+                _kaydet(c, width)
+            fill = HexColor("#ffffff") if ri%2==0 else HexColor("#eef4ee")
+            c.setFillColor(fill)
+            c.rect(1.5*cm, ypos-0.06*cm, width-3*cm, 0.42*cm, fill=1, stroke=0)
+            c.setFillColor(INK)
+            c.setFont(FONT_REG, 7)
             for j, val in enumerate(r):
-                x = 1.5 * cm + j * ((width - 3 * cm) / len(cols))
-                c.drawString(x, y, f"{val:,.2f}" if isinstance(val, (int, float)) else str(val))
-            y -= 0.32 * cm
-        y -= 0.5 * cm
+                x = 1.5*cm + j*((width-3*cm)/len(cols))
+                # sayi ise saga, metin sola
+                txt = val
+                if len(txt) > 22:
+                    txt = txt[:21] + "…"
+                c.drawString(x+0.08*cm, ypos+0.10*cm, txt)
+            # grid cizgisi
+            c.setStrokeColor(HexColor("#cfd8cf"))
+            c.setLineWidth(0.35)
+            c.rect(1.5*cm, ypos-0.06*cm, width-3*cm, 0.42*cm, fill=0, stroke=1)
+            ypos -= 0.42*cm
+        return ypos - 0.18*cm
+
+    y = _mini_tablo("Tablo 10 – Elektrik (özet)", tablo10_elektrik(tuketim), ["Alt Tür","Tüketim (kWh)","Emisyon (kgCO₂e)"], y)
+    y = _mini_tablo("Tablo 12 – Su (özet)", tablo12_su(tuketim, tesis.get("dolu_oda_gun",0), tesis.get("musteri",0)), ["Kaynak","Tüketim (m³)","Oda-Gün Başına (L)"], y)
+    y = _mini_tablo("Tablo 13 – Atık (özet)", tablo13_atik(tuketim), ["Atık Türü","Miktar (kg)","Emisyon (kgCO₂e)"], y)
+
+    # Dip not – Excel eki vurgusu
+    if y < 3*cm:
+        c.showPage()
+        y = height - 2.5*cm
+        _kaydet(c, width)
+    c.setFillColor(LIGHT)
+    c.setFont(FONT_REG, 7.5)
+    for line in simpleSplit("Not: Tam TGA Tablo 10-13 ham verileri ve Tablo 6-7, kimyasal envanter denetime hazır Excel ekinde sunulur. Bu PDF yönetici özetidir.", FONT_REG, 7.5, width-3*cm):
+        c.drawString(1.5*cm, y, line)
+        y -= 0.32*cm
 
     _kaydet(c, width)
     c.save()

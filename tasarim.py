@@ -11,6 +11,9 @@ import html as _html
 import os
 from io import BytesIO
 
+import qrcode as _qrcode
+from PIL import Image as _PILImage
+
 from raporlar import markdown_bloklar, _pdf_font_ayar
 
 PRIMARY = "#1d6b45"
@@ -22,6 +25,18 @@ BORDER = "#d9e0d9"
 MUTED = "#54635a"
 
 BROŞÜR_TARİH = "06.08.2026"
+
+
+def _afis_qr_pil(baslik: str, tesis_ad: str, tur_id: str = "gorsel_afis") -> _PILImage.Image:
+    """Gerçek QR kodu üretir (PIL Image). tesis+tur anahtarıyla benzersiz içerik."""
+    import qrcode as _qrcode
+    veri = f"{baslik}|{tesis_ad}|{tur_id}|{BROŞÜR_TARİH}"
+    qrc = _qrcode.QRCode(box_size=6, border=2)
+    qrc.add_data(veri)
+    qrc.make(fit=True)
+    img = qrc.make_image(fill_color="#1d6b45", back_color="white")
+    return img.convert("RGB")
+
 
 # Tür -> tasarımlı üretim fonksiyonları (html: önizleme, pdf: indirme, png: gerçek görsel)
 TASARIMLAR = {
@@ -409,11 +424,21 @@ def qr_pdf(son, metin: str) -> bytes:
 # ---------- Afiş / Poster (yatay) ----------
 
 def afis_html(son, metin: str) -> str:
+    import base64 as _b64
     tesis = tesis_adi(son)
     kpi = "".join(
         f'<div class="kpi"><div class="v">{v}</div><div class="l">{label} · {birim}</div></div>'
         for label, v, birim in kpi_listesi(son)[:3]
     )
+    # Gerçek QR kodu
+    try:
+        qr_img = _afis_qr_pil("KarbonAT Afiş", tesis)
+        buf = BytesIO()
+        qr_img.save(buf, format="PNG")
+        qr_b64 = _b64.b64encode(buf.getvalue()).decode("ascii")
+        qr_tag = f'<img src="data:image/png;base64,{qr_b64}" style="width:72px;height:72px;" alt="QR">'
+    except Exception:
+        qr_tag = "<span style=\"color:#9fc2ac;\">[ QR ]</span>"
     return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_html.escape(tesis)} — Afiş</title>
@@ -433,7 +458,6 @@ body {{ margin:0; font-family:'Segoe UI', Arial, sans-serif; background:#eef2ee;
 .pbody h3 {{ color:{DARK}; border-left:5px solid {ACCENT}; padding-left:10px; margin:20px 0 8px; font-size:19px; }}
 .pbody p, .pbody li {{ font-size:14px; color:#3a463e; line-height:1.55; }}
 .pfoot {{ display:flex; justify-content:space-between; align-items:center; padding:14px 40px 22px; font-size:12px; color:#9fc2ac; }}
-.pfoot .qr {{ border:2px dashed {ACCENT}; color:{ACCENT}; padding:8px 14px; border-radius:8px; font-weight:700; }}
 </style></head><body>
 <div class="poster">
   <div class="phead">
@@ -443,7 +467,7 @@ body {{ margin:0; font-family:'Segoe UI', Arial, sans-serif; background:#eef2ee;
   </div>
   <div class="pkpis">{kpi}</div>
   <div class="pbody">{md_html(metin)}</div>
-  <div class="pfoot"><span>KarbonAT Altyapısı</span><span class="qr">[ QR ]</span></div>
+  <div class="pfoot"><span>KarbonAT Altyapısı</span>{qr_tag}</div>
 </div></body></html>"""
 
 
@@ -499,13 +523,21 @@ def afis_pdf(son, metin: str) -> bytes:
                 continue
             akis.append(Paragraph("• " + icerik, stiller))
     akis.append(Spacer(1, 4 * mm))
-    qr = Table([[Paragraph("VERİ DOĞRULAMA İÇİN QR KODU TARATIN",
-                           ParagraphStyle("QR", fontName=bold, fontSize=8, textColor=a, alignment=1))]],
-               colWidths=[275 * mm])
-    qr.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 0.8, a),
-                            ("TOPPADDING", (0, 0), (-1, -1), 5),
-                            ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
-    akis.append(qr)
+    # Gerçek QR kodu görseli (reportlab Image)
+    try:
+        qr_img = _afis_qr_pil("KarbonAT Afiş", tesis_adi(son))
+        qb = BytesIO()
+        qr_img.save(qb, format="PNG")
+        qb.seek(0)
+        from reportlab.platypus import Image as RLImage
+        qrl = RLImage(qb, width=64*mm, height=64*mm)
+        qrl.hAlign = "RIGHT"
+        akis.append(qrl)
+        akis.append(Paragraph("VERİ DOĞRULAMA KODU TARATIN",
+                              ParagraphStyle("QR2", fontName=bold, fontSize=8, textColor=a, alignment=2)))
+    except Exception:
+        akis.append(Paragraph("VERİ DOĞRULAMA İÇİN QR KODU TARATIN",
+                              ParagraphStyle("QR2", fontName=bold, fontSize=8, textColor=a, alignment=1)))
     doc.build(akis)
     return buffer.getvalue()
 

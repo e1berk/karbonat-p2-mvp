@@ -16,3 +16,12 @@ Thumbs.db
 
 # Ortam / gizli anahtarlar
 .env
+
+# gecici / log
+*.log
+fix_*.py
+patch_*.py
+test_*.py
+update_cards.py
+mvp_patch.py
+out.txt

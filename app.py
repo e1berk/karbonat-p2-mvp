@@ -4,6 +4,7 @@
 # v0.4 - Yeniden Tasarım
 # ============================================
 
+import os
 import pandas as pd
 from datetime import datetime
 from io import BytesIO
@@ -31,7 +32,6 @@ from icerik_hub import (
 )
 import ai_engine
 import tasarim
-import streamlit.components.v1 as components
 from data_store import (
     list_facilities,
     get_facility,
@@ -50,6 +50,8 @@ from data_store import (
     save_report,
     get_media,
     save_media,
+    _db,
+    _save,
 )
 import raporlar
 
@@ -73,126 +75,174 @@ st.set_page_config(
     page_title="KarbonAT P2 - Otel Karbon Ayak İzi",
     page_icon="🌿",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ==============================================
-# STİL (SIFIRDAN)
+# PREMIUM STİL SİSTEMİ
 # ==============================================
 st.markdown(f"""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@500&display=swap');
     :root {{
-        --ink: {INK}; --primary: {PRIMARY}; --accent: {ACCENT};
-        --sage: {SAGE}; --mist: {MIST}; --card: {CARD};
-        --paper: {PAPER}; --border: {BORDER}; --muted: {MUTED};
-        --amber: {AMBER}; --terra: {TERRA};
+        --ink: {INK}; --primary: {PRIMARY}; --primary2:{PRIMARY2}; --accent:{ACCENT};
+        --sage:{SAGE}; --mist:{MIST}; --card:{CARD}; --paper:{PAPER}; --border:{BORDER}; --muted:{MUTED};
+        --amber:{AMBER}; --terra:{TERRA};
+        --r-sm: 12px; --r-md: 16px; --r-lg: 22px; --r-xl: 28px;
+        --shadow-sm: 0 2px 10px rgba(23,33,27,.06);
+        --shadow-md: 0 8px 28px rgba(23,33,27,.08);
+        --shadow-lg: 0 18px 44px rgba(23,33,27,.13);
     }}
-
-    /* ===== GENEL ===== */
-    .stApp {{ background: var(--paper); }}
-    html, body, p, li, span, div, label {{ color: var(--ink); font-family: 'Segoe UI', 'Helvetica Neue', sans-serif; }}
-    h1, h2, h3, h4, h5, h6 {{ color: var(--ink); font-weight: 750; letter-spacing: -0.3px; }}
-    h1 {{ font-size: 32px; margin-top: 0.2rem; }}
-    h3 {{ font-size: 20px; }}
-    [data-testid="stSidebar"] {{ background: #fff; border-right: 1px solid var(--border); }}
-    [data-testid="stSidebarNav"] {{ display: none; }}
-    .block-container {{ padding-top: 1.6rem; max-width: 1180px; }}
-
-    /* ===== SIDEBAR ===== */
-    .sb-brand {{ font-size: 21px; font-weight: 800; color: var(--primary); margin-bottom: 2px; }}
-    .sb-tag {{ font-size: 11px; color: var(--muted); margin-bottom: 14px; }}
+    .stApp {{ background:
+        radial-gradient(900px 500px at 12% -6%, rgba(61,168,115,.12), transparent 60%),
+        radial-gradient(800px 600px at 92% 0%, rgba(217,154,61,.10), transparent 55%),
+        linear-gradient(180deg, #f8faf7 0%, var(--paper) 100%);
+    }}
+    html, body, p, li, span, div, label {{ color: var(--ink); font-family: 'Plus Jakarta Sans','Segoe UI',system-ui,sans-serif; }}
+    h1,h2,h3 {{ font-family: 'Plus Jakarta Sans', sans-serif; letter-spacing: -0.6px; }}
+    h1 {{ font-size: 32px; font-weight: 800; }}
+    [data-testid="stSidebar"] {{
+        background: rgba(255,255,255,.86); backdrop-filter: blur(14px);
+        border-right: 1px solid rgba(227,233,227,.95); box-shadow: 6px 0 24px rgba(23,33,27,.04);
+    }}
+    [data-testid="stSidebarNav"] {{ display:none; }}
+    header[data-testid="stHeader"] {{ background: rgba(246,248,244,.82); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(227,233,227,.65); }}
+    header[data-testid="stHeader"] > div {{ background: transparent !important; }}
+    .block-container {{ padding-top: 3.2rem; max-width: 1220px; padding-bottom: 2.2rem; }}
+    /* hero asla header altinda kesilmesin */
+    .hero {{ margin-top: 6px; scroll-margin-top: 72px; }}
+    /* scroll bar */
+    ::-webkit-scrollbar {{ width:10px; height:10px; }}
+    ::-webkit-scrollbar-thumb {{ background: #d7e2d7; border-radius: 999px; border: 2px solid #eef4ee; }}
+    /* SIDEBAR */
+    .sb-brand {{ font-size:22px; font-weight:800; letter-spacing:-0.5px; color:var(--primary); }}
+    .sb-brand small {{ font-weight:700; color:var(--amber); margin-left:2px; }}
+    .sb-tag {{ font-size:11px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; margin: 2px 0 14px; }}
     .sb-card {{
-        background: var(--mist); border: 1px solid var(--border);
-        border-radius: 14px; padding: 14px 16px; margin: 10px 0;
+        background: linear-gradient(180deg, #ffffff 0%, #f7faf7 100%);
+        border:1px solid var(--border); border-radius: var(--r-md);
+        padding:14px 16px; margin:10px 0; box-shadow: var(--shadow-sm);
+        position:relative; overflow:hidden;
     }}
-    .sb-label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 6px; }}
-    .sb-value {{ font-weight: 700; font-size: 15px; color: var(--ink); }}
-    .sb-step {{ display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; margin: 4px 0; font-size: 14px; }}
-    .sb-step.active {{ background: var(--mist); color: var(--primary); font-weight: 700; }}
-    .sb-step.done {{ color: var(--muted); }}
-    .sb-num {{
-        width: 22px; height: 22px; border-radius: 50%; display: flex;
-        align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
-        background: var(--border); color: var(--muted); flex-shrink: 0;
+    .sb-card::before {{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background: linear-gradient(180deg, var(--primary), var(--accent)); opacity:.9; }}
+    .sb-label {{ font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); font-weight:700; margin-bottom:8px; }}
+    .sb-value {{ font-weight:800; font-size:15px; }}
+    /* step nav as pills */
+    div[data-testid="stSidebar"] .stButton > button {{
+        text-align:left; justify-content:flex-start; border-radius: 12px; padding:10px 14px; font-size:14px;
+        background: transparent !important; color: var(--muted) !important; border:1px solid transparent !important; box-shadow:none !important;
     }}
-    .sb-step.active .sb-num {{ background: var(--primary); color: #fff; }}
-    .sb-step.done .sb-num {{ background: var(--sage); color: var(--primary); }}
-
-    /* ===== BUTONLAR ===== */
+    div[data-testid="stSidebar"] .stButton > button:hover {{ background: var(--mist) !important; color: var(--primary) !important; }}
+    div[data-testid="stSidebar"] .stButton > button:disabled {{ opacity:.45; }}
+    /* global buttons */
     .stButton > button {{
-        background: var(--primary); color: #fff; border: none;
-        padding: 12px 28px; border-radius: 12px; font-weight: 700; font-size: 15px;
-        transition: all 0.18s ease; box-shadow: 0 3px 10px rgba(29,107,69,0.18);
+        background: linear-gradient(180deg, var(--primary) 0%, #17613f 100%); color:#fff; border:none;
+        padding: 12px 22px; border-radius: 14px; font-weight:800; font-size:14.5px; letter-spacing:-0.2px;
+        box-shadow: 0 8px 18px rgba(23,107,69,.22); transition: transform .16s, box-shadow .16s, filter .16s;
     }}
-    .stButton > button:hover {{ background: var(--primary2); transform: translateY(-1px); }}
+    .stButton > button:hover {{ transform: translateY(-1px); box-shadow: 0 10px 22px rgba(23,107,69,.26); filter: brightness(1.02); }}
+    .stButton > button:active {{ transform: translateY(0px); }}
     button[kind="secondary"] {{
-        background: #fff !important; color: var(--primary) !important;
-        border: 1.5px solid var(--primary) !important; box-shadow: none !important;
+        background:#fff !important; color: var(--primary) !important; border:1.5px solid #cfe3d4 !important;
+        box-shadow: var(--shadow-sm) !important;
     }}
+    button[kind="secondary"]:hover {{ border-color: var(--primary) !important; background:#f6faf7 !important; }}
     .stDownloadButton > button {{
-        background: var(--primary); color: #fff; border: none;
-        padding: 12px 24px; border-radius: 12px; font-weight: 700; font-size: 15px;
-        transition: all 0.18s ease;
+        background: linear-gradient(180deg, #1e6e46, #144a2e); color:#fff; border-radius:14px; font-weight:800;
+        box-shadow: 0 6px 14px rgba(23,107,69,.18);
     }}
-    .stDownloadButton > button:hover {{ background: var(--primary2); }}
-
-    /* ===== KARTLAR ===== */
-    .kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 14px 0; }}
+    /* KPI */
+    .kpi-grid {{ display:grid; grid-template-columns: repeat(4,1fr); gap:14px; margin:14px 0; }}
+    @media (max-width: 1100px) {{ .kpi-grid {{ grid-template-columns: repeat(2,1fr); }} }}
+    @media (max-width: 640px) {{ .kpi-grid {{ grid-template-columns: 1fr; }} }}
     .kpi-card {{
-        background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-        padding: 18px 20px; box-shadow: 0 1px 3px rgba(23,33,27,0.05);
+        background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%); border:1px solid var(--border);
+        border-radius: var(--r-lg); padding:18px 18px; box-shadow: var(--shadow-sm); position:relative; overflow:hidden;
     }}
-    .kpi-label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 6px; }}
-    .kpi-value {{ font-size: 26px; font-weight: 800; color: var(--ink); }}
-    .kpi-sub {{ font-size: 12.5px; color: var(--muted); margin-top: 4px; }}
-
+    .kpi-card::after {{ content:""; position:absolute; top:0; left:0; right:0; height:3px; background: linear-gradient(90deg, var(--primary), var(--accent)); opacity:.9; }}
+    .kpi-label {{ font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); font-weight:700; }}
+    .kpi-value {{ font-size:24px; font-weight:800; letter-spacing:-0.6px; }}
+    .kpi-sub {{ font-size:12.5px; color:var(--muted); }}
     .data-card {{
-        background: var(--card); border: 1px solid var(--border); border-radius: 16px;
-        padding: 20px 22px; margin: 12px 0; box-shadow: 0 1px 3px rgba(23,33,27,0.04);
+        background: rgba(255,255,255,.92); border:1px solid var(--border); border-radius: var(--r-lg);
+        padding:18px 18px; box-shadow: var(--shadow-sm); backdrop-filter: blur(6px);
     }}
-
     .banner {{
-        background: var(--mist); border: 1px solid var(--border); border-left: 4px solid var(--accent);
-        border-radius: 12px; padding: 13px 18px; margin: 10px 0; color: var(--ink); font-size: 14px;
+        background: linear-gradient(180deg, #ffffff, #f0f7f1); border:1px solid #dbe8de; border-left:4px solid var(--accent);
+        border-radius:14px; padding:14px 16px; color: var(--ink); box-shadow: var(--shadow-sm);
     }}
-
     .chip {{
-        background: var(--mist); color: var(--primary); border: 1px solid var(--sage);
-        padding: 5px 14px; border-radius: 20px; font-weight: 700; font-size: 13px;
-        display: inline-block; margin: 2px 6px 2px 0;
+        background: #fff; color: var(--primary); border:1px solid #d8e8dc;
+        padding:6px 12px; border-radius:999px; font-weight:800; font-size:12.5px; box-shadow: var(--shadow-sm);
     }}
-
-    .hero {{ text-align: center; padding: 46px 20px 30px; }}
-    .hero .logo {{ font-size: 58px; }}
-    .hero h1 {{ font-size: 42px; margin: 6px 0; }}
-    .hero p {{ color: var(--muted); font-size: 16px; max-width: 600px; margin: 0 auto; }}
-
-    .section-title {{ font-size: 17px; font-weight: 750; color: var(--ink); margin: 22px 0 10px; }}
-
-    .footer {{ text-align: center; color: var(--muted); font-size: 12.5px; padding: 34px 0 14px; }}
-
-    /* ===== FORM ===== */
-    .stTextInput input, .stNumberInput input, .stDateInput input {{
-        border-radius: 10px; border: 1px solid var(--border);
-        background: #fff; color: var(--ink);
+    .hero {{
+        text-align:center; padding: 38px 18px 22px; position:relative; overflow:hidden;
+        background: radial-gradient(700px 320px at 50% -10%, rgba(61,168,115,.16), transparent 70%),
+                    linear-gradient(180deg, rgba(255,255,255,.96), rgba(238,244,238,.9));
+        border:1px solid rgba(227,233,227,.9); border-radius: 22px; box-shadow: var(--shadow-md);
+        margin: 6px 0 18px;
     }}
-    .stTextInput label, .stNumberInput label, .stDateInput label {{
-        color: var(--ink) !important;
-    }}
-    [data-testid="stTextInputRootElement"] {{
-        background: #fff; color: var(--ink);
-    }}
-    .stExpander {{ background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 8px; }}
-    .stTabs [data-baseweb="tab-list"] {{ gap: 6px; }}
+    .hero .logo {{ font-size:52px; filter: drop-shadow(0 6px 16px rgba(23,107,69,.18)); }}
+    .hero h1 {{ font-size:38px; margin:6px 0 4px; }}
+    .hero p {{ color: var(--muted); max-width:640px; margin:0 auto; font-size:15.5px; line-height:1.5; }}
+    .section-title {{ font-size:16px; font-weight:800; letter-spacing:-0.3px; margin:22px 0 10px; display:flex; align-items:center; gap:10px; }}
+    .section-title::before {{ content:""; width:28px; height:3px; border-radius:999px; background: linear-gradient(90deg, var(--primary), var(--accent)); display:inline-block; }}
+    .footer {{ text-align:center; color:var(--muted); font-size:12.5px; padding:34px 0 10px; }}
+    /* form */
+    .stTextInput input, .stNumberInput input {{ border-radius:12px; border:1px solid #dbe3db; background:#fff; }}
+    .stTextInput input:focus, .stNumberInput input:focus {{ border-color: var(--accent); box-shadow: 0 0 0 3px rgba(61,168,115,.14); }}
+    .stExpander {{ background: rgba(255,255,255,.94); border:1px solid var(--border); border-radius:16px; box-shadow: var(--shadow-sm); }}
+    .stTabs [data-baseweb="tab-list"] {{ gap:8px; background: rgba(255,255,255,.72); padding:6px; border-radius: 14px; border:1px solid var(--border); }}
+    .stTabs [data-baseweb="tab-list"] {{ gap: 6px !important; background: #f1f5f9 !important; padding: 6px !important; border-radius: 12px !important; border: 1px solid #e2e8f0 !important; display:inline-flex !important; flex-wrap:wrap !important; margin-bottom: 16px !important; }}
     .stTabs [data-baseweb="tab"] {{
-        background: transparent; border-radius: 10px 10px 0 0; padding: 10px 18px;
-        font-weight: 600; color: var(--muted); border-bottom: 2.5px solid transparent;
+        background: transparent !important;
+        border: none !important;
+        border-radius: 8px !important;
+        padding: 9px 16px !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        color: #64748b !important;
+        transition: all 0.18s ease !important;
+    }}
+    .stTabs [data-baseweb="tab"]:hover {{
+        background: #ffffff !important;
+        color: #0f172a !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
     }}
     .stTabs [aria-selected="true"] {{
-        color: var(--primary); border-bottom-color: var(--primary);
+        background: #166534 !important;
+        color: #ffffff !important;
+        box-shadow: 0 2px 8px rgba(22, 101, 52, 0.20) !important;
     }}
-    [data-testid="stMetricValue"] {{ font-size: 24px; font-weight: 800; color: var(--primary); }}
-    [data-testid="stMetricLabel"] {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }}
+    .tga-card {{ background:#ffffff; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin:8px 0; box-shadow:0 1px 3px rgba(0,0,0,0.04); transition: all .18s ease; }}
+    .tga-card:hover {{ border-color:#bbf7d0; box-shadow:0 4px 12px rgba(22,101,52,0.08); transform: translateY(-1px); }}
+    .tga-card:focus-within {{ border-color:#166534; box-shadow:0 0 0 3px rgba(22,101,52,0.10); }}
+    div[data-testid="stNumberInput"] input {{
+        border: 1px solid #d1d5db !important;
+        border-radius: 6px !important;
+        background: #ffffff !important;
+        font-size: 14px !important;
+        color: #0f172a !important;
+    }}
+    div[data-testid="stNumberInput"] input:focus {{
+        border-color: #166534 !important;
+        box-shadow: 0 0 0 3px rgba(22, 101, 52, 0.12) !important;
+    }}
+    .stTabs [aria-selected="true"] {{ background: var(--primary); color:#fff !important; box-shadow: var(--shadow-sm); }}
+    [data-testid="stMetricValue"] {{ font-weight:800; color:var(--primary); }}
+    /* data card hover */
+    .data-card:hover {{ border-color:#d4e3d6; box-shadow: var(--shadow-md); transform: translateY(-1px); transition:.18s; }}
+    /* MVP Stepper - horizontal */
+    .mvp-stepper {{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:10px 0 14px; padding:8px; background:#fff; border:1px solid var(--border); border-radius:12px; box-shadow: var(--shadow-sm);}}
+    .mvp-step {{display:flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; font-size:13px; font-weight:700; color:var(--muted); background:transparent; border:1px solid transparent;}}
+    .mvp-step.active {{background:var(--primary); color:#fff; border-color:var(--primary); box-shadow:0 2px 8px rgba(29,107,69,.18);}}
+    .mvp-step.done {{background:var(--mist); color:var(--primary); border-color:var(--sage);}}
+    .mvp-step .num {{width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:800; background:var(--border); color:var(--muted);}}
+    .mvp-step.active .num {{background:#fff; color:var(--primary);}}
+    .mvp-step.done .num {{background:var(--sage); color:var(--primary);}}
+    .mvp-arrow {{color:var(--muted); font-weight:800;}}
+    .mvp-cta {{position:sticky; bottom:12px; z-index:20; background:rgba(255,255,255,.96); backdrop-filter:blur(8px); border:1px solid var(--border); border-radius:14px; padding:12px; box-shadow: var(--shadow-md); margin-top:18px;}}
+    .mvp-empty {{background: linear-gradient(180deg, #fff, #f7faf7); border:1px solid var(--border); border-radius:14px; padding:22px; text-align:center; box-shadow: var(--shadow-sm);}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -221,11 +271,42 @@ def init_session():
             st.session_state[k] = v
 
 
+def reset_to_home():
+    """Tüm tesis/veri state'ini temizle ve anasayfaya (step 0) dön."""
+    # Tüm facility/veri state'ini topla sil
+    keys_to_clear = [
+        "step", "facility_id", "tesis", "tuketim", "sonuc", "history",
+        "kategori_totallari", "musteri", "dolu_oda_gun",
+        "atik_bertaraf", "yenilenebilir_oran", "_load_period",
+        "show_raporlar", "categori_totallari",
+    ]
+    for k in keys_to_clear:
+        if k in st.session_state:
+            del st.session_state[k]
+    # Widget key'leri de temizle (veri_*, rte_, rmod_, vb.)
+    widget_keys = [k for k in st.session_state.keys()
+                   if k.startswith(("veri_", "rte_", "rmod_", "rkapat_",
+                                    "rug_", "rapdf_", "radoc_", "raex_",
+                                    "rasv_", "rkcd_", "rapor_detay_",
+                                    "medya_detay_", "mkapat_", "mte_",
+                                    "tp_", "uretim_", "gorsel_",
+                                    "mga_", "mpdf_", "mpng_",
+                                    "mthtml_", "mdoc_", "msav_",
+                                    "mcd_"))]
+    for k in widget_keys:
+        del st.session_state[k]
+    init_session()
+    st.session_state.step = 0
+    st.rerun()
+
+
 init_session()
 
 KATEGORI_BIRIM = {
     "Elektrik": "kWh",
-    "Doğal Gaz": "m³ / kg",
+    "Doğal Gaz ve Yakıtlar": "m³ / kg / L",
+    "Soğutucu & F-Gaz (Scope 1)": "kg",
+    "Araç Filosu & İş Seyahatleri (Scope 1/3)": "L / km",
     "Su": "m³",
     "Gıda Tüketimi": "kg",
     "Atık Yönetimi": "kg",
@@ -245,6 +326,69 @@ STEP_ISIMLERI = [
 # ==============================================
 # SIDEBAR
 # ==============================================
+def _clear_facility_state():
+    """Tesis değişince veri/sonuç state'ini temizle (widget key'leri de)."""
+    keys_to_clear = [
+        "tesis", "tuketim", "sonuc", "history",
+        "kategori_totallari", "musteri", "dolu_oda_gun",
+        "atik_bertaraf", "yenilenebilir_oran", "_load_period",
+        "show_raporlar",
+    ]
+    for k in keys_to_clear:
+        if k in st.session_state:
+            del st.session_state[k]
+    # Widget key'leri (veri_*, rte_*, vb.) de temizle
+    widget_keys = [k for k in st.session_state.keys()
+                   if k.startswith(("veri_", "rte_", "rmod_", "rkapat_",
+                                    "rug_", "rapdf_", "radoc_", "raex_",
+                                    "rasv_", "rkcd_", "rapor_detay_",
+                                    "medya_detay_", "mkapat_", "mte_",
+                                    "tp_", "uretim_", "gorsel_",
+                                    "mga_", "mpdf_", "mpng_",
+                                    "mthtml_", "mdoc_", "msav_",
+                                    "mcd_"))]
+    for k in widget_keys:
+        del st.session_state[k]
+
+
+def _save_draft(fac_id):
+    """Mevcut form verisini taslak olarak kaydet (hesaplamadan)."""
+    draft = {
+        "fac_id": fac_id,
+        "period": st.session_state.period,
+        "musteri": st.session_state.musteri,
+        "dolu_oda_gun": st.session_state.dolu_oda_gun,
+        "tuketim": st.session_state.tuketim,
+        "atik_bertaraf": st.session_state.atik_bertaraf,
+        "atik_bertaraf_idx": ATIK_BERTARAF_SECENEKLERI.index(st.session_state.atik_bertaraf),
+        "yenilenebilir_oran": st.session_state.yenilenebilir_oran,
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "is_draft": True,
+    }
+    # drafts ayrı bir key altında sakla
+    db = _db()
+    drafts = db.setdefault("drafts", {}).setdefault(fac_id, {})
+    drafts[st.session_state.period] = draft
+    _save(db)
+
+
+def _load_previous_period():
+    """Önceki dönem kaydını yükle (manuel)."""
+    fac_id = st.session_state.facility_id
+    current = st.session_state.period
+    prev = get_previous_record(fac_id, current)
+    if prev:
+        st.session_state.tuketim = prev["tuketim"]
+        st.session_state.musteri = prev["musteri"]
+        st.session_state.dolu_oda_gun = prev["dolu_oda_gun"]
+        st.session_state.atik_bertaraf = prev["atik_bertaraf"]
+        st.session_state.yenilenebilir_oran = prev.get("yenilenebilir_oran", 30)
+        st.session_state._load_period = prev["period"]
+        st.toast(f"Önceki dönem ({format_donem(prev['period'])}) yüklendi", icon="🔙")
+    else:
+        st.warning("Önceki dönem kaydı bulunamadı")
+
+
 def sidebar():
     with st.sidebar:
         st.markdown('<div class="sb-brand">🌿 KarbonAT <span style="color:#d99a3d;">P2</span></div>'
@@ -274,24 +418,34 @@ def sidebar():
                 unsafe_allow_html=True,
             )
 
-        # Adım göstergesi
+        # Adım göstergesi (tıklanabilir navigasyon)
         st.markdown(f'<div class="sb-label" style="margin-top:14px;">İlerleme</div>', unsafe_allow_html=True)
         step = st.session_state.step
         for i, (emoji, isim) in enumerate(STEP_ISIMLERI):
             cls = "active" if i == step else ("done" if i < step else "")
-            st.markdown(
-                f'<div class="sb-step {cls}"><div class="sb-num">{i + 1}</div>'
-                f'<span>{emoji} {isim}</span></div>',
-                unsafe_allow_html=True,
-            )
+            disabled = False
+            # Sadece tamamlanan/aktif adımlara gitmeye izin ver; ileri atlama yok
+            if i > step and step < 5:
+                disabled = True
+            if st.button(
+                f"{emoji} {isim}",
+                key=f"sb_nav_{i}",
+                width='stretch',
+                disabled=disabled,
+                help=("Aktif adım" if i == step else
+                      ("Tamamlandı — geri dön" if i < step else "Önce önceki adımları tamamlayın")),
+            ):
+                # State temizliği gerekirse (örn. step 4→2 veri değişirse)
+                if i < step:
+                    # Geri dönüşte veri state'i koru (sadece step değişir)
+                    st.session_state.step = i
+                else:
+                    st.session_state.step = i
+                st.rerun()
 
         st.markdown("---")
-        if st.button("🔄 Sıfırla", use_container_width=True, type="secondary"):
-            for k in ["step", "facility_id", "tesis", "tuketim", "sonuc", "history", "kategori_totallari"]:
-                if k in st.session_state:
-                    del st.session_state[k]
-            init_session()
-            st.rerun()
+        if st.button("🔄 Sıfırla (Anasayfa)", width='stretch', type="secondary"):
+            reset_to_home()
 
         st.markdown('<div class="sb-label" style="margin-top:20px;">Oturum</div>', unsafe_allow_html=True)
         if st.session_state.user:
@@ -304,13 +458,52 @@ def sidebar():
                 f'</div>',
                 unsafe_allow_html=True,
             )
-            if st.button("🚪 Çıkış Yap", use_container_width=True, type="secondary"):
-                for k in ["user", "step", "facility_id", "tesis", "tuketim", "sonuc", "history"]:
-                    if k in st.session_state:
-                        del st.session_state[k]
+            if st.button("🚪 Çıkış Yap", width='stretch', type="secondary"):
+                # Kullanıcı + tüm facility state'i temizle
+                all_keys = list(st.session_state.keys())
+                for k in all_keys:
+                    del st.session_state[k]
                 init_session()
                 st.rerun()
 
+
+def mvp_stepper(active=0):
+    steps = [("1","Tesis"),("2","Veri"),("3","Hesap"),("4","Rapor"),("5","Medya")]
+    html = '<div class="mvp-stepper">'
+    for i,(n,lbl) in enumerate(steps):
+        cls = "active" if i==active else ("done" if i<active else "")
+        html += f'<div class="mvp-step {cls}"><span class="num">{n}</span> {lbl}</div>'
+        if i < len(steps)-1:
+            html += '<span class="mvp-arrow">→</span>'
+    html += '</div>'
+    return html
+
+
+def _ai_fallback_icerik(tur_id, tesis, sonuc):
+    """AI kotası doluyken deterministik taslak üretir (boş ekran yerine)."""
+    from icerik_hub import ISKELETLER
+    iskelet = ISKELETLER.get(tur_id, [])
+    ad = tesis.get("ad", "Tesisimiz")
+    m = (sonuc or {}).get("metrikler", {}) if isinstance(sonuc, dict) else {}
+    ton = m.get("toplam_ton", "?")
+    lines = [f"> _Not: AI kotası dolu — deterministik taslak gösteriliyor. Daha zengin metin için birkaç dakika sonra tekrar deneyin._", ""]
+    for baslik in iskelet:
+        lines.append(f"### {baslik}")
+        if "ton" in ton.__str__().lower() or baslik.lower().startswith("kapak"):
+            lines.append(f"{ad} için {baslik.lower()} — hesaplanan toplam {ton} ton CO₂e verisine dayalı taslak metin. Detaylar için veri girişini düzenleyin.")
+        else:
+            lines.append(f"{ad} — {baslik} için taslak içerik (AI kapalıyken gösterilen yedek metin).")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _ai_fallback_rapor(sab, tesis, sonuc):
+    """Rapor için deterministik fallback."""
+    ad = tesis.get("ad", "Tesisimiz")
+    m = (sonuc or {}).get("metrikler", {}) if isinstance(sonuc, dict) else {}
+    ton = m.get("toplam_ton", "?")
+    cols = ", ".join(sab.get("cikti", []))
+    return f"> _AI kotası dolu — deterministik taslak. {sab['baslik']} şablonu ({cols}) için yer tutucu._\n\n### {sab['baslik']}\n\n{ad} — {ton} ton CO₂e hesap verisine dayalı rapor taslağı. Gerçek AI üretimi için birkaç dakika sonra Yenile'ye basın.\n\n| Alan | Değer |\n|---|---|\n| Tesis | {ad} |\n| Toplam | {ton} ton CO₂e |\n"
 
 # ==============================================
 # YARDIMCILAR
@@ -350,7 +543,8 @@ def _tesis_ozet(t):
 
 
 def _hesapla(tesis, tuketim, musteri, dolu_oda_gun, atik_bertaraf="", yenilenebilir_oran=None):
-    scope_data = hesapla_scope_ayrimi(tuketim)
+    y_oran = yenilenebilir_oran if yenilenebilir_oran is not None else 0
+    scope_data = hesapla_scope_ayrimi(tuketim, y_oran)
     metrikler = hesapla_normalize_metrikler(
         scope_data["toplam"], tesis["m2"], tesis["oda"], tesis["personel"],
         musteri, dolu_oda_gun,
@@ -390,29 +584,320 @@ def _color_for_pct(pct):
 # GİRİŞ / KAYIT
 # ==============================================
 def auth_screen():
-    st.markdown("""
-    <div class="hero">
-        <div class="logo">🌿</div>
-        <h1>KarbonAT P2</h1>
-        <p>GSTC / TGA uyumlu karbon ayak izi ve sürdürülebilirlik raporlaması</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('''
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Hide all Streamlit Chrome & Headers */
+        #MainMenu, header, footer, [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] {
+            display: none !important;
+        }
+        
+        /* Force full screen viewport without top padding or margins */
+        html, body, .stApp, .main, [data-testid="stAppViewContainer"], [data-testid="stAppViewBlockContainer"] {
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+            background-color: #ffffff !important;
+            font-family: 'Inter', -apple-system, sans-serif !important;
+        }
 
-    col = st.columns([2, 3, 2])[1]
+        .block-container {
+            padding: 0 !important;
+            margin: 0 !important;
+            max-width: 100% !important;
+            width: 100% !important;
+        }
 
-    with col:
+        /* Target Streamlit Horizontal Block (Column Container) */
+        div[data-testid="stHorizontalBlock"] {
+            min-height: 100vh !important;
+            width: 100% !important;
+            margin: 0 !important;
+            gap: 0 !important;
+            display: flex !important;
+        }
+
+        /* AGGRESSIVE LEFT COLUMN TARGETING (Dark Green Side) */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child,
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(1),
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(1),
+        div[data-testid="stColumn"]:first-child {
+            background-color: #0f3822 !important;
+            background: #0f3822 !important;
+            color: #ffffff !important;
+            padding: 60px 48px !important;
+            min-height: 100vh !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            flex: 1 1 50% !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Force EVERY element in left column to be white */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child *,
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(1) *,
+        div[data-testid="stColumn"]:first-child * {
+            color: #ffffff !important;
+        }
+
+        /* AGGRESSIVE RIGHT COLUMN TARGETING (Pure White Side) */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child,
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2),
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-of-type(2),
+        div[data-testid="stColumn"]:last-child {
+            background-color: #ffffff !important;
+            background: #ffffff !important;
+            color: #0f172a !important;
+            padding: 60px 48px !important;
+            min-height: 100vh !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            flex: 1 1 50% !important;
+            box-sizing: border-box !important;
+        }
+
+        /* Ensure vertical block inside right column is centered and has proper width */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:nth-child(2) [data-testid="stVerticalBlock"] {
+            width: 100% !important;
+            max-width: 420px !important;
+            margin: 0 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+        }
+
+        /* Custom Left Branding Styling */
+        .brand-container {
+            max-width: 520px;
+            margin: 0 auto;
+        }
+        .brand-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid rgba(255,255,255,0.22);
+            background: rgba(255,255,255,0.08);
+            color: #d8efe1 !important;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-bottom: 20px;
+        }
+        .brand-title {
+            font-size: 46px;
+            font-weight: 800;
+            color: #ffffff !important;
+            letter-spacing: -1.4px;
+            line-height: 1.05;
+            margin: 0 0 10px 0;
+        }
+        .brand-title span {
+            color: #86efac !important;
+        }
+        .brand-sub {
+            font-size: 20px;
+            font-weight: 600;
+            color: #ffffff !important;
+            margin: 0 0 12px 0;
+        }
+        .brand-desc {
+            font-size: 14.5px;
+            color: #cfe8d6 !important;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+        .bullet-item {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            margin: 18px 0;
+        }
+        .bullet-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.18);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            flex-shrink: 0;
+            color: #ffffff !important;
+        }
+        .bullet-text b {
+            color: #ffffff !important;
+            font-size: 15px;
+            font-weight: 700;
+            display: block;
+            margin-bottom: 3px;
+        }
+        .bullet-text span {
+            color: #b7d8c2 !important;
+            font-size: 13px;
+            line-height: 1.45;
+            display: block;
+        }
+
+        /* Custom Right Form Styling */
+        .auth-head-title {
+            font-size: 26px;
+            font-weight: 800;
+            color: #0f172a !important;
+            text-align: center;
+            margin: 0 0 6px 0;
+            letter-spacing: -0.6px;
+        }
+        .auth-head-sub {
+            font-size: 14px;
+            color: #64748b !important;
+            text-align: center;
+            margin: 0 0 24px 0;
+        }
+
+        /* Modern Input Styling */
+        div[data-testid="stTextInput"] label {
+            font-size: 13px !important;
+            font-weight: 600 !important;
+            color: #0f172a !important;
+            margin-bottom: 6px !important;
+        }
+        div[data-testid="stTextInput"] input {
+            background-color: #f8fafc !important;
+            border: 1px solid #e2e8f0 !important;
+            border-radius: 8px !important;
+            padding: 12px 14px !important;
+            font-size: 14px !important;
+            color: #0f172a !important;
+            box-shadow: none !important;
+            transition: all 0.18s ease !important;
+        }
+        div[data-testid="stTextInput"] input:focus {
+            background-color: #ffffff !important;
+            border-color: #166534 !important;
+            box-shadow: 0 0 0 3px rgba(22, 101, 52, 0.12) !important;
+            outline: none !important;
+        }
+
+        /* Segmented Control as Sleek Tabs */
+        div[data-testid="stSegmentedControl"] {
+            background-color: #f1f5f9 !important;
+            border-radius: 10px !important;
+            padding: 4px !important;
+            gap: 4px !important;
+            width: 100% !important;
+            margin-bottom: 16px !important;
+        }
+        div[data-testid="stSegmentedControl"] button {
+            border-radius: 8px !important;
+            font-weight: 600 !important;
+            font-size: 13px !important;
+            border: none !important;
+            background: transparent !important;
+            color: #64748b !important;
+            flex: 1 !important;
+        }
+        div[data-testid="stSegmentedControl"] button[aria-pressed="true"] {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+        }
+
+        /* Premium Green Button */
+        div[data-testid="stButton"] > button {
+            background-color: #166534 !important;
+            background: linear-gradient(180deg, #166534 0%, #14532b 100%) !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 8px !important;
+            padding: 14px 16px !important;
+            font-weight: 700 !important;
+            font-size: 14.5px !important;
+            width: 100% !important;
+            box-shadow: 0 4px 14px rgba(22, 101, 52, 0.25) !important;
+            transition: all 0.18s ease !important;
+            margin-top: 8px !important;
+        }
+        div[data-testid="stButton"] > button:hover {
+            background-color: #14532b !important;
+            transform: translateY(-1px) !important;
+            box-shadow: 0 6px 18px rgba(22, 101, 52, 0.32) !important;
+        }
+        div[data-testid="stButton"] > button:active {
+            transform: translateY(0px) !important;
+        }
+
+        /* Mobile responsiveness */
+        @media (max-width: 900px) {
+            div[data-testid="stHorizontalBlock"] {
+                flex-direction: column !important;
+            }
+            div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:first-child,
+            div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
+                min-height: auto !important;
+                padding: 40px 24px !important;
+            }
+        }
+    </style>
+    ''', unsafe_allow_html=True)
+
+    col_left, col_right = st.columns([1, 1], gap=0)
+
+    with col_left:
+        st.markdown('''
+        <div class="brand-container">
+            <div class="brand-kicker">● GSTC · TGA UYUMLU PLATFORM</div>
+            <div class="brand-title">Karbon<span>AT</span></div>
+            <div class="brand-sub">Yapay Zeka Destekli Yeşil Dönüşüm</div>
+            <div class="brand-desc">Oteller için otonom sürdürülebilirlik altyapısı — veriden rapora tek akışta.</div>
+            <div class="bullet-item">
+                <div class="bullet-icon">⚡</div>
+                <div class="bullet-text">
+                    <b>Otonom Veri Çıkarımı</b>
+                    <span>Tüketim verilerini otomatik toplayın ve işleyin</span>
+                </div>
+            </div>
+            <div class="bullet-item">
+                <div class="bullet-icon">◈</div>
+                <div class="bullet-text">
+                    <b>Kapsam 1-2-3 Hesabı</b>
+                    <span>HCMI metodolojisiyle eksiksiz karbon hesabı</span>
+                </div>
+            </div>
+            <div class="bullet-item">
+                <div class="bullet-icon">✓</div>
+                <div class="bullet-text">
+                    <b>TGA/GSTC Uyumlu Raporlama</b>
+                    <span>Tablo 6-13, yeşil rapor ve denetime hazır çıktılar</span>
+                </div>
+            </div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+    with col_right:
+        st.markdown('''
+        <div class="auth-head-title">Hoş geldiniz</div>
+        <div class="auth-head-sub">Hesabınıza giriş yapın veya yeni hesap oluşturun</div>
+        ''', unsafe_allow_html=True)
+
         secim = st.segmented_control(
             "Giriş türü",
-            options=["🔑 Giriş Yap", "✨ Kayıt Ol"],
-            default="🔑 Giriş Yap",
+            options=["Giriş Yap", "Kayıt Ol"],
+            default="Giriş Yap",
             key="auth_mode",
             label_visibility="hidden",
         )
 
-        if secim == "🔑 Giriş Yap":
-            username = st.text_input("Kullanıcı adı", key="auth_uname")
-            password = st.text_input("Şifre", type="password", key="auth_pw")
-            if st.button("Giriş Yap", use_container_width=True):
+        if secim == "Giriş Yap":
+            username = st.text_input("Kullanıcı adı", placeholder="ornek_kullanici", key="auth_uname")
+            password = st.text_input("Şifre", type="password", placeholder="••••••••", key="auth_pw")
+            if st.button("Sisteme Giriş Yap", width='stretch'):
                 user = verify_login(username, password)
                 if user:
                     st.session_state.user = user
@@ -421,10 +906,10 @@ def auth_screen():
                 else:
                     st.error("Kullanıcı adı veya şifre hatalı.")
         else:
-            yeni_adi = st.text_input("Ad Soyad", key="reg_name")
-            yeni_uname = st.text_input("Kullanıcı adı", key="reg_uname")
-            yeni_pw = st.text_input("Şifre (en az 4 karakter)", type="password", key="reg_pw")
-            if st.button("Hesap Oluştur", use_container_width=True):
+            yeni_adi = st.text_input("Ad Soyad", placeholder="Ad Soyad", key="reg_name")
+            yeni_uname = st.text_input("Kullanıcı adı", placeholder="kullanici_adi", key="reg_uname")
+            yeni_pw = st.text_input("Şifre (en az 4 karakter)", type="password", placeholder="••••••••", key="reg_pw")
+            if st.button("Kayıt Ol", width='stretch'):
                 if len(yeni_pw) < 4:
                     st.error("Şifre en az 4 karakter olmalı.")
                 else:
@@ -435,67 +920,76 @@ def auth_screen():
                         st.rerun()
                     else:
                         st.error("Bu kullanıcı adı zaten alınmış.")
-
-
 # ==============================================
 # ADIM 0 - TESİS SEÇİMİ (PROFİLİM / OTELLERİM)
 # ==============================================
 def adim_tesis_secimi():
-    st.markdown("""
-    <div class="hero">
-        <div class="logo">🌿</div>
-        <h1>KarbonAT P2</h1>
-        <p>Aylık tüketim verilerinizi TGA takip tablolarına ve karbon ayak izi raporuna dönüştürür.</p>
-    </div>
-    """, unsafe_allow_html=True)
-
+    st.markdown(
+        f"""<div class="hero" style="padding:28px 18px 20px;">
+            <div style="display:inline-flex; align-items:center; gap:8px; background:#fff; border:1px solid {BORDER}; padding:6px 10px; border-radius:999px; font-size:12px; font-weight:800; color:{PRIMARY}; box-shadow: var(--shadow-sm);">🌿 KarbonAT P2 · GSTC/TGA</div>
+            <h1 style="margin:12px 0 6px; font-size:34px;">Otellerinizi yönetin</h1>
+            <p style="max-width:640px; margin:0 auto; color:{MUTED};">Aylık tüketimi girin, TGA tablolarınız ve yeşil raporlarınız otomatik oluşsun.</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
     user = st.session_state.user
     facilities = list_facilities(user["id"])
-    col = st.columns([2, 3, 2])[1]
-
     if facilities:
+        st.markdown(
+            f'<div class="section-title">🏨 Profilim · Otellerim '
+            f'<span style="color:{MUTED}; font-weight:700; background:#fff; border:1px solid {BORDER}; padding:3px 8px; border-radius:999px;">{len(facilities)}</span></div>',
+            unsafe_allow_html=True,
+        )
+        col = st.columns([2, 3, 2])[1]
         with col:
-            st.markdown(
-                f'<div class="section-title">🏨 Profilim · Otellerim '
-                f'<span style="color:#6b7a70; font-weight:500;">({len(facilities)})</span></div>',
-                unsafe_allow_html=True,
-            )
             secenekler = {t["ad"]: t["id"] for t in facilities}
-            secim = st.selectbox("Tesisinizi seçin", list(secenekler.keys()))
-            st.session_state.facility_id = secenekler[secim]
-            st.session_state.tesis = get_facility(st.session_state.facility_id)
+            secim = st.selectbox(
+                "Tesisinizi seçin",
+                list(secenekler.keys()),
+                key="fac_select",
+                on_change=_clear_facility_state,
+            )
+            new_fac_id = secenekler[secim]
+            if st.session_state.facility_id != new_fac_id:
+                _clear_facility_state()
+                st.session_state.facility_id = new_fac_id
+                st.session_state.tesis = get_facility(new_fac_id)
+            else:
+                st.session_state.facility_id = new_fac_id
+                st.session_state.tesis = get_facility(new_fac_id)
 
             kayitlar = list_records(st.session_state.facility_id)
             if kayitlar:
                 son = kayitlar[-1]
                 st.markdown(
-                    f'<div class="banner">📅 Son kayıt: <strong>{format_donem(son["period"])}</strong> · '
-                    f'{son["sonuc"]["metrikler"]["toplam_ton"]} ton CO₂e</div>',
+                    f'<div style="background: linear-gradient(180deg, #fff, #f6faf7); border:1px solid {BORDER}; border-radius:14px; padding:12px 14px; display:flex; align-items:center; justify-content:space-between; box-shadow: var(--shadow-sm);">'
+                    f'<span style="display:flex; align-items:center; gap:8px;"><span style="width:28px; height:28px; border-radius:8px; background:{MIST}; border:1px solid {BORDER}; display:inline-flex; align-items:center; justify-content:center;">📅</span> <b>{format_donem(son["period"])}</b> · {son["sonuc"]["metrikler"]["toplam_ton"]} ton CO₂e</span>'
+                    f'<span style="background:{PRIMARY}; color:#fff; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:800;">✓ Kayıtlı</span></div>',
                     unsafe_allow_html=True,
                 )
 
             st.markdown("")
             a, b = st.columns(2)
             with a:
-                if st.button("📊 Raporlar", use_container_width=True):
+                if st.button("📊 Raporlar", width='stretch'):
                     st.session_state.show_raporlar = True
                     st.rerun()
             with b:
-                if st.button("📣 Medya & İçerik", use_container_width=True, type="secondary"):
+                if st.button("📣 Medya & İçerik", width='stretch', type="secondary"):
                     st.session_state.step = 5
                     st.rerun()
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("📊 Veri Girişi", use_container_width=True, type="secondary"):
+                if st.button("📊 Veri Girişi", width='stretch', type="secondary"):
                     st.session_state.history = list_records(st.session_state.facility_id)
                     st.session_state.step = 2
                     st.rerun()
             with c2:
-                if st.button("✏️ Profili Düzenle", use_container_width=True, type="secondary"):
+                if st.button("✏️ Profili Düzenle", width='stretch', type="secondary"):
                     st.session_state.step = 1
                     st.rerun()
             with c3:
-                if st.button("＋ Yeni Tesis", use_container_width=True, type="secondary"):
+                if st.button("＋ Yeni Tesis", width='stretch', type="secondary"):
                     st.session_state.tesis = {}
                     st.session_state.facility_id = None
                     st.session_state.step = 1
@@ -519,14 +1013,17 @@ def adim_tesis_secimi():
                 if rec:
                     _rapor_karti(st.session_state.facility_id, rec["period"], rec["sonuc"])
     else:
+        col = st.columns([2, 3, 2])[1]
         with col:
-            st.markdown('<div class="section-title">Henüz oteliniz yok</div>', unsafe_allow_html=True)
             st.markdown(
-                f'<div class="banner">👋 Hoş geldiniz, <strong>{user.get("fullname", user["username"])}</strong>! '
-                f'İlk tesis profilinizi oluşturarak başlayın.</div>',
+                f'<div style="background: linear-gradient(180deg, #fff, #f7faf7); border:1px solid {BORDER}; border-radius:18px; padding:22px 18px; text-align:center; box-shadow: var(--shadow-md);">'
+                f'<div style="width:56px; height:56px; border-radius:14px; background: linear-gradient(135deg,{PRIMARY},{ACCENT}); color:#fff; display:flex; align-items:center; justify-content:center; font-size:26px; margin:0 auto 10px; box-shadow:0 8px 16px rgba(29,107,69,.22);">🏨</div>'
+                f'<div style="font-weight:800; font-size:16px;">Henüz oteliniz yok</div>'
+                f'<div style="font-size:13px; color:{MUTED}; margin:6px 0 14px;">Hoş geldiniz, <b>{user.get("fullname", user["username"])}</b>! İlk tesis profilinizi oluşturarak başlayın — 1 dakikada hazır.</div></div>',
                 unsafe_allow_html=True,
             )
-            if st.button("▶ Tesis Oluştur", use_container_width=True):
+            st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+            if st.button("▶ İlk Tesisi Oluştur", width='stretch'):
                 st.session_state.step = 1
                 st.rerun()
 
@@ -535,8 +1032,9 @@ def adim_tesis_secimi():
 # ADIM 1 - TESİS PROFİLİ
 # ==============================================
 def adim_tesis():
+    st.markdown(mvp_stepper(active=0), unsafe_allow_html=True)
     st.markdown('<h1>🏨 Tesis Profili</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="color:#6b7a70;">Bir kerelik bilgiler. Sonradan değiştirilebilir.</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#6b7a70;">Bir kerelik bilgiler. Sonradan değiştirilebilir. <b>İpucu:</b> m² = ısıtılan toplam alan, oda = envanterdeki oda sayısı.</p>', unsafe_allow_html=True)
 
     t = st.session_state.tesis or {}
     st.markdown('<div class="section-title">Kimlik & Kapasite</div>', unsafe_allow_html=True)
@@ -557,12 +1055,12 @@ def adim_tesis():
     st.markdown("---")
     col_back, col_next = st.columns([1, 2])
     with col_back:
-        if st.button("← Geri", use_container_width=True):
+        if st.button("← Geri", width='stretch'):
             st.session_state.step = 0
             st.rerun()
     with col_next:
         disabled = not (tesis_adi and m2 and oda and personel)
-        if st.button("💾 Kaydet ve Devam", use_container_width=True, disabled=disabled):
+        if st.button("💾 Kaydet ve Devam", width='stretch', disabled=disabled):
             tesis = {
                 "ad": tesis_adi,
                 "m2": int(m2),
@@ -614,23 +1112,76 @@ def _eski_yenilenebilir(tesis, mevcut, onceki):
     return 30
 
 
+def _demo_veri_uret(tesis):
+    """Tesis kapasitesine göre gerçekçi demo tüketim üretir (görüşmede 1 tık değer görme)."""
+    import random
+    m2 = int(tesis.get("m2", 1000))
+    oda = int(tesis.get("oda", 50))
+    pers = int(tesis.get("personel", 20))
+    # Operasyon: musteri ~ oda*0.65*30, oda-gün ~ oda*0.62*30
+    musteri = max(120, int(oda * 0.65 * 30 * random.uniform(0.85, 1.05)))
+    dolu_oda_gun = max(300, int(oda * 0.62 * 30 * random.uniform(0.85, 1.05)))
+    # Elektrik kWh ~ m2*14 + oda*55
+    elec_total = m2 * random.uniform(10, 15) + oda * 55 + pers * 30
+    tuketim = {}
+    for kat in EMISSION_FACTORS:
+        tuketim[kat] = {alt: 0.0 for alt in EMISSION_FACTORS[kat]}
+    # Elektrik dağılımı
+    tuketim["Elektrik"]["Şebeke (yenilenebilir olmayan)"] = round(elec_total * 0.68, 1)
+    tuketim["Elektrik"]["Şebeke (yenilenebilir YEK-G sertifikalı)"] = round(elec_total * 0.18, 1)
+    tuketim["Elektrik"]["Güneş Enerjisi (PV)"] = round(elec_total * 0.09, 1)
+    tuketim["Elektrik"]["Rüzgar Enerjisi"] = round(elec_total * 0.05, 1)
+    # Doğal gaz & yakıt
+    tuketim["Doğal Gaz ve Yakıtlar"]["Doğalgaz (m³)"] = round(m2 * 0.7 * random.uniform(0.8, 1.1), 1)
+    tuketim["Doğal Gaz ve Yakıtlar"]["LPG (kg)"] = round(oda * 1.2 * random.uniform(0.7, 1.2), 1)
+    # F-gaz kaçak
+    tuketim["Soğutucu & F-Gaz (Scope 1)"]["R-410A (kg)"] = round(random.uniform(1.5, 4.5), 2)
+    tuketim["Soğutucu & F-Gaz (Scope 1)"]["R-32 (kg)"] = round(random.uniform(0.5, 2.0), 2)
+    # Araç
+    tuketim["Araç Filosu & İş Seyahatleri (Scope 1/3)"]["Benzinli Araç (L)"] = round(180 + oda * 1.5, 1)
+    tuketim["Araç Filosu & İş Seyahatleri (Scope 1/3)"]["Dizel Araç (L)"] = round(220 + oda * 1.2, 1)
+    # Su
+    tuketim["Su"]["Şebeke suyu tüketimi (m³)"] = round(musteri * 0.18 + oda * 0.9, 1)
+    tuketim["Su"]["Atık su arıtma (m³)"] = round(musteri * 0.12, 1)
+    # Gıda
+    tuketim["Gıda Tüketimi"]["Kırmızı Et (kg)"] = round(musteri * 0.25, 1)
+    tuketim["Gıda Tüketimi"]["Tavuk (kg)"] = round(musteri * 0.35, 1)
+    tuketim["Gıda Tüketimi"]["Sebze (kg)"] = round(musteri * 0.9, 1)
+    tuketim["Gıda Tüketimi"]["Süt (kg)"] = round(musteri * 0.4, 1)
+    # Atık
+    tuketim["Atık Yönetimi"]["Organik Atık (kg)"] = round(musteri * 0.55, 1)
+    tuketim["Atık Yönetimi"]["Plastik Atık (kg)"] = round(musteri * 0.18, 1)
+    tuketim["Atık Yönetimi"]["Kağıt (kg)"] = round(musteri * 0.12, 1)
+    # Kimyasal
+    tuketim["Kimyasal Tüketimi"]["Deterjan (L)"] = round(oda * 0.6, 1)
+    tuketim["Kimyasal Tüketimi"]["Temizlik Ürünleri (L)"] = round(oda * 0.9, 1)
+    return {
+        "tuketim": tuketim,
+        "musteri": musteri,
+        "dolu_oda_gun": dolu_oda_gun,
+        "atik_bertaraf": "Ağırlıklı geri dönüşüm",
+        "yenilenebilir_oran": random.choice([22, 28, 35]),
+    }
+
+
 def _kategori_kart(kategori, tuketim, period):
     """Bir kategori için alt tür kartları (2 kolon)."""
     alt_turler = EMISSION_FACTORS.get(kategori, {})
     birim = KATEGORI_BIRIM.get(kategori, "")
     cols = st.columns(2)
     yeni = {}
-    for i, alt in enumerate(alt_turler.items()):
-        ad, ef = alt
+    for i, (ad, ef) in enumerate(alt_turler.items()):
         col = cols[i % 2]
         with col:
-            st.markdown(f'<div class="data-card" style="padding:14px 16px; margin:6px 0;">', unsafe_allow_html=True)
             st.markdown(
-                f'<div style="display:flex; justify-content:space-between; align-items:baseline;">'
-                f'<span style="font-weight:700; font-size:14px;">{ad}</span>'
-                f'<span class="chip" style="font-size:10px; margin:0;">{birim}</span>'
+                f'<div class="tga-card">'
+                f'<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">'
+                f'<div style="display:flex; align-items:center; gap:8px;">'
+                f'<span style="font-weight:700; font-size:14px; color:#0f172a; letter-spacing:-0.2px;">{ad}</span>'
+                f'<span style="background:#f1f5f9; color:#475569; font-weight:600; font-size:11px; padding:2px 8px; border-radius:4px;">{birim}</span>'
                 f'</div>'
-                f'<div style="font-size:11px; color:{MUTED}; margin-top:2px;">EF: {ef} kgCO₂e/{birim}</div>',
+                f'<span style="background:#f8fafc; color:#64748b; border:1px solid #e2e8f0; font-weight:600; font-size:11px; padding:2px 8px; border-radius:4px;">EF {ef} kgCO₂e/{birim}</span>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
             mevcut_deger = float(tuketim.get(kategori, {}).get(ad, 0.0))
@@ -639,9 +1190,10 @@ def _kategori_kart(kategori, tuketim, period):
                 min_value=0.0,
                 step=1.0,
                 value=mevcut_deger,
-                key=f"veri_{period}_{kategori}_{ad}",
+                key=f"veri_{st.session_state.facility_id}_{period}_{kategori}_{ad}",
                 label_visibility="hidden",
                 format="%.2f",
+                placeholder="0.00",
             )
             yeni[ad] = yeni_deger
             st.markdown('</div>', unsafe_allow_html=True)
@@ -649,11 +1201,21 @@ def _kategori_kart(kategori, tuketim, period):
 
 
 def adim_veri():
+    st.markdown(mvp_stepper(active=1), unsafe_allow_html=True)
     tesis = st.session_state.tesis
-    st.markdown(f'<h1>📊 Aylık Veri Girişi</h1>', unsafe_allow_html=True)
     st.markdown(
-        f'<div class="chip">🌿 {tesis["ad"]}</div>'
-        f'<div class="chip">📐 {_tesis_ozet(tesis)}</div>',
+        f"""<div style="display:flex; align-items:center; gap:12px; margin:6px 0 4px;">
+            <div style="width:42px;height:42px;border-radius:12px; background: linear-gradient(135deg,{PRIMARY},{ACCENT}); display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; box-shadow:0 6px 16px rgba(29,107,69,.22);">📊</div>
+            <div><div style="font-size:22px; font-weight:800; letter-spacing:-0.5px; line-height:1;">Aylık Veri Girişi</div>
+            <div style="font-size:13px; color:{MUTED}; margin-top:2px;">TGA takip tabloları için bu ayın tüketim verileri</div></div></div>""",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div style="display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 2px;">'
+        f'<span class="chip">🌿 {tesis["ad"]}</span>'
+        f'<span class="chip">📐 {_tesis_ozet(tesis)}</span>'
+        f'<span class="chip" style="background:#fff8ec; border-color:#f0d9a0; color:#8a5a12;">🧾 {st.session_state.period}</span>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
@@ -688,8 +1250,9 @@ def adim_veri():
             unsafe_allow_html=True,
         )
 
-    # Tuketim + aylık alanlar
-    if "_load_period" not in st.session_state or st.session_state._load_period != secilen:
+    # Tuketim + aylık alanlar (tesis+donem bazlı anahtar)
+    _load_key = f"{st.session_state.facility_id}::{secilen}"
+    if "_load_period" not in st.session_state or st.session_state._load_period != _load_key:
         base = None
         if mevcut:
             base = mevcut["tuketim"]
@@ -705,24 +1268,78 @@ def adim_veri():
         st.session_state.dolu_oda_gun = mevcut["dolu_oda_gun"] if mevcut else (onceki["dolu_oda_gun"] if onceki else 0)
         st.session_state.atik_bertaraf = _eski_bertaraf(tesis, mevcut, onceki)
         st.session_state.yenilenebilir_oran = _eski_yenilenebilir(tesis, mevcut, onceki)
-        st.session_state._load_period = secilen
+        st.session_state._load_period = _load_key
 
     tuketim = st.session_state.tuketim
 
+    # ——— 1-tık demo: tesis kapasitesine göre gerçekçi örnek veri ———
+    _toplam_girdi = sum(v for kat in tuketim.values() for v in kat.values()) + int(st.session_state.musteri) + int(st.session_state.dolu_oda_gun)
+    if _toplam_girdi == 0:
+        st.markdown(
+            f'<div class="mvp-empty" style="text-align:left; display:flex; gap:14px; align-items:center;">'
+            f'<div style="width:44px; height:44px; border-radius:12px; background: linear-gradient(135deg,{PRIMARY},{ACCENT}); color:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; flex-shrink:0;">✨</div>'
+            f'<div style="flex:1;"><div style="font-weight:800;">İlk değerinizi hemen görün</div>'
+            f'<div style="font-size:13px; color:{MUTED};">{tesis["ad"]} kapasitesine göre örnek tüketim oluşturayım mı? Tek tıkla doldurup hemen hesaplayabilirsiniz — sonra istediğinizi düzenlersiniz.</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("✨ Kapasiteye göre örnek veriyle doldur — 1 tık", width='stretch'):
+            demo = _demo_veri_uret(tesis)
+            # session + widget state'i doğrudan demo değerleriyle doldur
+            st.session_state.tuketim = demo["tuketim"]
+            st.session_state.musteri = demo["musteri"]
+            st.session_state.dolu_oda_gun = demo["dolu_oda_gun"]
+            st.session_state.atik_bertaraf = demo["atik_bertaraf"]
+            st.session_state.yenilenebilir_oran = demo["yenilenebilir_oran"]
+            for kat, alts in demo["tuketim"].items():
+                for alt, val in alts.items():
+                    wk = f"veri_{st.session_state.facility_id}_{secilen}_{kat}_{alt}"
+                    st.session_state[wk] = float(val)
+            # hemen hesaplayıp kaydet ki Sonuç ekranı 0 göstermesin
+            try:
+                _demo_sonuc = _hesapla(tesis, demo["tuketim"], demo["musteri"], demo["dolu_oda_gun"],
+                                       atik_bertaraf=demo["atik_bertaraf"], yenilenebilir_oran=demo["yenilenebilir_oran"])
+                save_record({
+                    "fac_id": st.session_state.facility_id,
+                    "period": secilen,
+                    "musteri": demo["musteri"],
+                    "dolu_oda_gun": demo["dolu_oda_gun"],
+                    "tuketim": demo["tuketim"],
+                    "atik_bertaraf": demo["atik_bertaraf"],
+                    "yenilenebilir_oran": demo["yenilenebilir_oran"],
+                    "sonuc": _demo_sonuc,
+                })
+                st.session_state.sonuc = _demo_sonuc
+                st.session_state.history = list_records(st.session_state.facility_id)
+            except Exception:
+                pass
+            st.toast("Örnek veri dolduruldu — Hesaplandı, Sonuç ekranına geçebilirsiniz", icon="✨")
+            st.rerun()
+            st.stop()
+
     # Operasyon
     st.markdown('<div class="section-title">🛏️ Bu Ayki Operasyon</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">', unsafe_allow_html=True)
     col_m, col_d = st.columns(2)
     with col_m:
+        st.markdown(f'<div class="data-card" style="margin:0;">'
+                    f'<div style="font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:{MUTED}; margin-bottom:6px;">👥 Müşteri</div>', unsafe_allow_html=True)
         musteri = st.number_input(
             "Müşteri sayısı (konaklayan kişi)", min_value=0, step=10,
             value=int(st.session_state.musteri), help="Örn: 1 aile = 4 kişi",
+            label_visibility="collapsed",
         )
+        st.markdown('</div>', unsafe_allow_html=True)
     with col_d:
+        st.markdown(f'<div class="data-card" style="margin:0;">'
+                    f'<div style="font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:{MUTED}; margin-bottom:6px;">🛏️ Satılan Oda-Gün</div>', unsafe_allow_html=True)
         dolu_oda_gun = st.number_input(
             "Satılan oda-gün sayısı", min_value=0, step=50,
             value=int(st.session_state.dolu_oda_gun),
             help="Toplam oda × doluluk × gün (HCMI)",
+            label_visibility="collapsed",
         )
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     st.session_state.musteri = musteri
     st.session_state.dolu_oda_gun = dolu_oda_gun
 
@@ -730,12 +1347,14 @@ def adim_veri():
     st.markdown('<div class="section-title">🗂️ TGA Takip Tabloları</div>', unsafe_allow_html=True)
 
     sekmeler = [
-        ("🔌 Elektrik · Tablo 10", "Elektrik"),
-        ("🔥 Doğal Gaz", "Doğal Gaz"),
-        ("🚿 Su · Tablo 12", "Su"),
-        ("🍽️ Gıda", "Gıda Tüketimi"),
-        ("♻️ Atık · Tablo 13", "Atık Yönetimi"),
-        ("🧪 Kimyasal", "Kimyasal Tüketimi"),
+        ("Elektrik (Tablo 10)", "Elektrik"),
+        ("Doğal Gaz ve Yakıtlar", "Doğal Gaz ve Yakıtlar"),
+        ("Soğutucu & F-Gaz", "Soğutucu & F-Gaz (Scope 1)"),
+        ("Araç Filosu & Seyahat", "Araç Filosu & İş Seyahatleri (Scope 1/3)"),
+        ("Su (Tablo 12)", "Su"),
+        ("Gıda Tüketimi", "Gıda Tüketimi"),
+        ("Atık Yönetimi (Tablo 13)", "Atık Yönetimi"),
+        ("Kimyasal Tüketimi", "Kimyasal Tüketimi"),
     ]
 
     tabs = st.tabs([s[0] for s in sekmeler])
@@ -778,8 +1397,7 @@ def adim_veri():
                 )
                 st.markdown('</div>', unsafe_allow_html=True)
 
-            with st.expander(f"📦 {kat} tüketim kartları", expanded=False):
-                tuketim[kat] = _kategori_kart(kat, tuketim, secilen)
+            tuketim[kat] = _kategori_kart(kat, tuketim, secilen)
 
             kat_toplam = sum(
                 miktar * EMISSION_FACTORS[kat].get(alt, 0.0)
@@ -808,22 +1426,33 @@ def adim_veri():
     c3.metric("Müşteri Başına", f"{m['musteri_kg']} kg")
     c4.metric("m² Başına", f"{m['m2_aylik_kg']} kg")
 
+    st.markdown('<div class="mvp-cta">', unsafe_allow_html=True)
     st.markdown("---")
-    col_back, col_next = st.columns([1, 2])
+    col_back, col_draft, col_prev, col_next = st.columns([1, 1, 1, 2])
     with col_back:
-        if st.button("← Geri", use_container_width=True):
+        if st.button("← Geri", width='stretch'):
             st.session_state.step = 1
             st.rerun()
+    with col_draft:
+        if st.button("💾 Taslak Kaydet", width='stretch'):
+            _save_draft(tesis["id"])
+            st.toast("Taslak kaydedildi", icon="💾")
+    with col_prev:
+        if st.button("🔙 Önceki Aya Dön", width='stretch'):
+            _load_previous_period()
+            st.rerun()
     with col_next:
-        if st.button("🧮 Hesapla ve Raporla", use_container_width=True):
+        if st.button("🧮 Hesapla ve Raporla", width='stretch'):
             st.session_state.step = 3
             st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ==============================================
 # ADIM 3 - HESAPLAMA
 # ==============================================
 def adim_hesap():
+    st.markdown(mvp_stepper(active=2), unsafe_allow_html=True)
     st.markdown('<h1>🧮 Hesaplama</h1>', unsafe_allow_html=True)
     tesis = st.session_state.tesis
     period = st.session_state.period
@@ -864,7 +1493,7 @@ def _markdown_blok(metin):
     """Markdown'ı gösterir; tabloları kaydırmalı DataFrame olarak basar (taşma olmaz)."""
     for tur, icerik in raporlar.markdown_bloklar(metin):
         if tur == "tablo":
-            st.dataframe(icerik, use_container_width=True, hide_index=True)
+            st.dataframe(icerik, width='stretch', hide_index=True)
         elif icerik and icerik.strip():
             st.markdown(icerik)
 
@@ -885,7 +1514,7 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
 
     kayit = get_report(fac_id, period, sab_id)
 
-    if st.button("🚀 Üret / Yenile", key=f"rug_{fac_id}_{period}_{sab_id}", use_container_width=True):
+    if st.button("🚀 Üret / Yenile", key=f"rug_{fac_id}_{period}_{sab_id}", width='stretch'):
         try:
             with st.spinner("Şablon tesis verilerinizle dolduruluyor..."):
                 cik = raporlar.rapor_uretim(sab_id, tesis, sonuc, prefs)
@@ -903,6 +1532,13 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
                     "engellemeyi uzatır. Kalıcı çözüm: GEMINI_API_KEY'i ücretli bir "
                     "anahtarla değiştirin. https://ai.google.dev/gemini-api/docs/rate-limits"
                 )
+                # Fallback: boş ekran yerine deterministik taslak kaydet
+                try:
+                    fallback = _ai_fallback_rapor(sab, tesis, sonuc)
+                    save_report(fac_id, period, sab_id, fallback, tip="ai-fallback")
+                    st.info("AI kotası dolu — geçici deterministik taslak kaydedildi. Birkaç dakika sonra Yenile ile zenginleştirebilirsiniz.")
+                except Exception:
+                    pass
             else:
                 st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kota yoksa birkaç saniye sonra tekrar deneyin.")
 
@@ -940,7 +1576,7 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
         try:
             st.download_button("⬇️ PDF", data=raporlar.rapor_pdf(icerik),
                                file_name=f"KarbonAT_{sab_id}_{period}.pdf", mime="application/pdf",
-                               key=f"rapdf_{fac_id}_{period}_{sab_id}", use_container_width=True)
+                               key=f"rapdf_{fac_id}_{period}_{sab_id}", width='stretch')
         except Exception as e:  # noqa: BLE001
             st.warning(f"PDF: {e}")
     with d2:
@@ -948,7 +1584,7 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
             st.download_button("📄 Word (.docx)", data=raporlar.rapor_docx(icerik),
                                file_name=f"KarbonAT_{sab_id}_{period}.docx",
                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                               key=f"radoc_{fac_id}_{period}_{sab_id}", use_container_width=True)
+                               key=f"radoc_{fac_id}_{period}_{sab_id}", width='stretch')
         except Exception as e:  # noqa: BLE001
             st.warning(f"Word: {e}")
     with d3:
@@ -960,11 +1596,11 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
             st.download_button("📊 Excel", data=xlsx,
                                file_name=f"KarbonAT_{sab_id}_{period}.xlsx",
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                               key=f"raex_{fac_id}_{period}_{sab_id}", use_container_width=True)
+                               key=f"raex_{fac_id}_{period}_{sab_id}", width='stretch')
         except Exception as e:  # noqa: BLE001
             st.warning(f"Excel: {e}")
     with d4:
-        if st.button("💾 Düzenlemeyi Kaydet", key=f"rasv_{fac_id}_{period}_{sab_id}", use_container_width=True):
+        if st.button("💾 Düzenlemeyi Kaydet", key=f"rasv_{fac_id}_{period}_{sab_id}", width='stretch'):
             save_report(fac_id, period, sab_id, icerik, tip=kayit.get("tip", "ai"))
             st.toast("Düzenleme kaydedildi.")
             st.rerun()
@@ -972,29 +1608,37 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
 
 def _rapor_karti(fac_id, period, sonuc):
     if not sonuc:
-        st.info("Önce hesaplama yapın; raporlar veriyle dolar.")
+        st.markdown(
+            f'<div class="banner" style="border-left-color:{AMBER};">'
+            f'<strong>⏳ Raporlar için hesaplama gerekiyor.</strong> Önce verinizi hesaplayın, sonra her şablon canlı veriyle dolar.</div>',
+            unsafe_allow_html=True,
+        )
         return
     tesis = sonuc.get("tesis") or {}
-    st.markdown('<div class="section-title">📊 Raporlar</div>', unsafe_allow_html=True)
-    st.caption(
-        "Aşağıdan bir şablon seçin → üretin → düzenleyin → PDF/Word/Excel indirin. "
-        "Ürettikleriniz profilinizde (Raporlar → aylar) saklanır."
-    )
+    st.markdown('<div class="section-title">📊 TGA Rapor Şablonları</div>', unsafe_allow_html=True)
+    st.caption("Bir kart seçin → AI ile tesis verinizle doldurun → düzenleyin → PDF / Word / Excel indirin. Üretilenler profilinizde saklanır.")
     prefs = {"amac": "Raporlama", "ton": "Kurumsal & Resmi", "dil": "Türkçe", "uzunluk": "Detaylı"}
     secim_key = f"rapor_detay_{fac_id}_{period}"
-
     SUTUN = 3
     cols = st.columns(SUTUN)
     for i, sab in enumerate(raporlar.RAPOR_SABLONLARI):
         sab_id = sab["id"]
         kayit = get_report(fac_id, period, sab_id)
-        durum = "✅ Kayıtlı" if kayit else "⏳ Beklemede"
+        ready = bool(kayit)
+        badge = f'<span style="background:{"#e6f4ea" if ready else "#fff7e6"}; color:{"#0f5132" if ready else "#7a4a00"}; border:1px solid {"#b7e1c3" if ready else "#f0d9a0"}; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:800;">{"✅ Hazır" if ready else "⏳ Beklemede"}</span>'
+        desc = " · ".join(sab.get("cikti", []))
         with cols[i % SUTUN]:
-            if st.button(f"{sab['emoji']} {sab['baslik']}", key=f"rcd_{fac_id}_{period}_{sab_id}",
-                         use_container_width=True):
+            st.markdown(
+                f'<div class="data-card" style="padding:14px 14px 10px; min-height:118px; display:flex; flex-direction:column; justify-content:space-between;">'
+                f'<div><div style="font-size:18px; margin-bottom:6px;">{sab["emoji"]}</div>'
+                f'<div style="font-weight:800; font-size:14px; line-height:1.25;">{sab["baslik"]}</div>'
+                f'<div style="font-size:12px; color:{MUTED}; margin-top:4px; line-height:1.4;">{sab.get("aciklama","")[:92]}</div></div>'
+                f'<div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:8px;">{badge}<span style="font-size:11px; color:{MUTED};">{desc}</span></div></div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(f"→ Aç", key=f"rcd_{fac_id}_{period}_{sab_id}", width='stretch'):
                 st.session_state[secim_key] = sab_id
                 st.rerun()
-            st.caption(f"{durum} · {' · '.join(sab['cikti'])}")
 
     secilen = st.session_state.get(secim_key)
     if secilen:
@@ -1006,6 +1650,7 @@ def _rapor_karti(fac_id, period, sonuc):
 
 # ==============================================
 def adim_sonuc():
+    st.markdown(mvp_stepper(active=3), unsafe_allow_html=True)
     st.markdown('<h1>📄 Karbon Ayak İzi Sonucu</h1>', unsafe_allow_html=True)
 
     if st.session_state.sonuc is None:
@@ -1114,7 +1759,7 @@ def adim_sonuc():
                     legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5),
                 )
                 fig.update_traces(textposition="inside", textinfo="percent")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except Exception as e:
                 st.error(f"Grafik oluşturulamadı: {e}")
         else:
@@ -1129,7 +1774,9 @@ def adim_sonuc():
     detay_rows = []
     for kat, (emoji, birim) in {
         "Elektrik": ("🔌", "kWh"),
-        "Doğal Gaz": ("🔥", "m³/kg"),
+        "Doğal Gaz ve Yakıtlar": ("🔥", "m³/kg"),
+        "Soğutucu & F-Gaz (Scope 1)": ("❄️", "kg"),
+        "Araç Filosu & İş Seyahatleri (Scope 1/3)": ("🚗", "L/km"),
         "Su": ("🚿", "m³"),
         "Gıda Tüketimi": ("🍽️", "kg"),
         "Atık Yönetimi": ("♻️", "kg"),
@@ -1152,7 +1799,7 @@ def adim_sonuc():
 
     if detay_rows:
         detay_df = pd.DataFrame(detay_rows).sort_values("Emisyon (kg)", ascending=False)
-        st.dataframe(detay_df, use_container_width=True, hide_index=True)
+        st.dataframe(detay_df, width='stretch', hide_index=True)
     else:
         st.info("Henüz emisyon kaynağı bulunmuyor.")
 
@@ -1186,17 +1833,102 @@ def adim_sonuc():
     with col_xls:
         try:
             import openpyxl  # noqa: F401
+            from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
             tablolar = tum_tablolar(r, period)
             buffer = BytesIO()
             with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+                # Kapak sayfası – kurumsal kimlik
+                kapak_df = pd.DataFrame([
+                    ["KarbonAT P2 – TGA Uyumlu Takip Paketi"],
+                    [f"Tesis: {tesis['ad']}"],
+                    [f"Dönem: {format_donem(period)}"],
+                    [f"Oluşturulma: {__import__('datetime').datetime.now().strftime('%d.%m.%Y %H:%M')}"],
+                    [""],
+                    ["Bu dosya KarbonAT tarafından tesisin gerçek aylık verilerinden üretilmiştir."],
+                    ["GSTC / TGA Tablo 6,7,10-13 ve kimyasal envanter içerir."],
+                    ["Her sayfa filtreli, yazdırma ayarlı ve denetime hazırdır."],
+                ])
+                kapak_df.to_excel(writer, sheet_name="Kapak", index=False, header=False)
+                ws_kapak = writer.sheets["Kapak"]
+                ws_kapak["A1"].font = Font(name="Calibri", size=14, bold=True, color="1D6B45")
+                ws_kapak["A1"].alignment = Alignment(horizontal="left", vertical="center")
+                for r in range(2, 9):
+                    ws_kapak.cell(row=r, column=1).font = Font(name="Calibri", size=10, color="17201c")
+                ws_kapak.column_dimensions["A"].width = 78
+                ws_kapak.sheet_properties.pageSetUpPr.fitToPage = True
+                ws_kapak.page_setup.orientation = "portrait"
+                ws_kapak.page_setup.paperSize = ws_kapak.PAPERSIZE_A4
+                ws_kapak.page_setup.fitToWidth = 1
+                ws_kapak.page_margins.left = 0.6
+                ws_kapak.page_margins.right = 0.6
                 for sheet, df in tablolar.items():
                     df.to_excel(writer, sheet_name=sheet[:31], index=False)
+                    ws = writer.sheets[sheet[:31]]
+                    # Kurumsal stil (raporlar.py ile aynı palet)
+                    HEADER_FILL = PatternFill(start_color="1D6B45", end_color="1D6B45", fill_type="solid")
+                    HEADER_FONT = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
+                    HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    ZEBRA_FILL = PatternFill(start_color="EEF4EE", end_color="EEF4EE", fill_type="solid")
+                    CELL_ALIGN = Alignment(horizontal="left", vertical="center", wrap_text=True)
+                    THIN = Side(style="thin", color="CFD8CF")
+                    thin_border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+                    ncols = len(df.columns)
+                    nrows = len(df) + 1
+                    for c in range(1, ncols + 1):
+                        cell = ws.cell(row=1, column=c)
+                        cell.fill = HEADER_FILL
+                        cell.font = HEADER_FONT
+                        cell.alignment = HEADER_ALIGN
+                        cell.border = thin_border
+                    for r in range(2, nrows + 1):
+                        for c in range(1, ncols + 1):
+                            cell = ws.cell(row=r, column=c)
+                            cell.alignment = CELL_ALIGN
+                            cell.border = thin_border
+                            cell.font = Font(name="Calibri", size=9 if ncols < 8 else 8)
+                            if r % 2 == 1 and r >= 3:
+                                cell.fill = ZEBRA_FILL
+                            try:
+                                if isinstance(cell.value, (int, float)):
+                                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                            except Exception:
+                                pass
+                    for col_idx, col_name in enumerate(df.columns, 1):
+                        max_len = len(str(col_name))
+                        for val in df[col_name].astype(str):
+                            if len(val) > max_len:
+                                max_len = len(val)
+                        width = min(36, max(12, max_len * 1.05 + 2))
+                        if ncols >= 10:
+                            width = min(width, 18)
+                        elif ncols >= 7:
+                            width = min(width, 24)
+                        ws.column_dimensions[get_column_letter(col_idx)].width = width
+                    ws.row_dimensions[1].height = 26 if ncols >= 8 else 20
+                    for r in range(2, nrows + 1):
+                        ws.row_dimensions[r].height = 16
+                    ws.freeze_panes = "A2"
+                    try:
+                        ws.auto_filter.ref = ws.dimensions
+                    except Exception:
+                        pass
+                    ws.sheet_properties.pageSetUpPr.fitToPage = True
+                    ws.page_setup.orientation = "landscape" if ncols >= 7 else "portrait"
+                    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+                    ws.page_setup.fitToWidth = 1
+                    ws.page_setup.fitToHeight = 0
+                    ws.page_margins.left = 0.4
+                    ws.page_margins.right = 0.4
+                    ws.page_margins.top = 0.5
+                    ws.page_margins.bottom = 0.5
+                    ws.print_title_rows = "1:1"
             st.download_button(
                 label="📊 TGA Tabloları (Excel)",
                 data=buffer.getvalue(),
                 file_name=f"KarbonAT_{tesis['ad'].replace(' ', '_')}_{period}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+                width='stretch',
             )
         except ImportError:
             st.warning("Excel için `openpyxl` kurun: pip install openpyxl")
@@ -1209,13 +1941,13 @@ def adim_sonuc():
                 data=green_pdf,
                 file_name=f"KarbonAT_YeşilRapor_{tesis['ad'].replace(' ', '_')}_{period}.pdf",
                 mime="application/pdf",
-                use_container_width=True,
+                width='stretch',
             )
         except Exception as e:
             st.error(f"PDF oluşturulamadı: {e}")
 
     with col_yeni:
-        if st.button("🔄 Yeni Hesaplama", use_container_width=True):
+        if st.button("🔄 Yeni Hesaplama", width='stretch'):
             st.session_state.step = 2
             st.session_state.tuketim = _sifir_tuketim()
             st.rerun()
@@ -1235,7 +1967,7 @@ def adim_sonuc():
             }
             for k in st.session_state.history
         ])
-        st.dataframe(kayit_df, use_container_width=True, hide_index=True)
+        st.dataframe(kayit_df, width='stretch', hide_index=True)
         try:
             import plotly.express as px
             fig2 = px.line(kayit_df, x="Dönem", y="Toplam (ton)", markers=True,
@@ -1243,7 +1975,7 @@ def adim_sonuc():
             fig2.update_layout(plot_bgcolor="white", paper_bgcolor="white",
                                margin=dict(t=10, b=10, l=0, r=0),
                                font=dict(family="Segoe UI", size=13))
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
         except Exception:
             st.bar_chart(kayit_df.set_index("Dönem")["Toplam (ton)"])
     else:
@@ -1258,6 +1990,19 @@ def adim_sonuc():
 # ==============================================
 # ADIM 5 - İÇERİK MERKEZİ (CONTENT ENGINE v2)
 # ==============================================
+def _aktif_sonuc(fac_id):
+    """Oturumda hesaplama yoksa tesisin son kaydındaki gerçek veriyi kullanır."""
+    sonuc = st.session_state.sonuc
+    if isinstance(sonuc, dict) and sonuc:
+        return sonuc
+    kayitlar = list_records(fac_id)
+    if kayitlar:
+        s = kayitlar[-1].get("sonuc")
+        if isinstance(s, dict):
+            return s
+    return None
+
+
 def _icerik_detay(fac_id, tur):
     tur_id = tur["id"]
     defaults = varsayilan_tercih(tur_id)
@@ -1312,13 +2057,15 @@ def _icerik_detay(fac_id, tur):
     st.markdown("---")
     aktif = st.button(
         f"🚀 {tur['baslik']} Üret",
-        use_container_width=True,
+        width='stretch',
         key=f"uretim_{fac_id}_{tur_id}",
         help="Tesis verileri + tercihlerin + TGA şablon referansları (RAG) ile AI içeriği üretir.",
     )
     if aktif:
-        tesis = st.session_state.tesis
-        sonuc = st.session_state.sonuc
+        _t = st.session_state.tesis
+        tesis = _t if isinstance(_t, dict) else {}
+        _s = _aktif_sonuc(fac_id)
+        sonuc = _s if isinstance(_s, dict) else None
         if not ai_engine.kbs_var_mi():
             st.info("Bilgi bankası (data/kb.json) yok. `python kb_build.py` ile oluştur. RAG'sız yine de üretilecek.")
         try:
@@ -1338,6 +2085,14 @@ def _icerik_detay(fac_id, tur):
                     "engellemeyi uzatır. Kalıcı çözüm: GEMINI_API_KEY'i ücretli bir "
                     "anahtarla değiştirin. https://ai.google.dev/gemini-api/docs/rate-limits"
                 )
+                try:
+                    fb = _ai_fallback_icerik(tur_id, tesis or {}, sonuc)
+                    save_media(fac_id, tur_id, fb)
+                    st.info("AI kotası dolu — geçici taslak kaydedildi. Birkaç dakika sonra yeniden deneyin.")
+                    st.session_state.pop(f"mte_{fac_id}_{tur_id}", None)
+                    st.rerun()
+                except Exception:
+                    pass
             else:
                 st.caption("İpucu: GEMINI_API_KEY .env içinde olmalı; kota yoksa birkaç saniye sonra tekrar deneyin.")
 
@@ -1348,23 +2103,64 @@ def _icerik_detay(fac_id, tur):
 
     mte_key = f"mte_{fac_id}_{tur_id}"
     icerik = st.session_state.get(mte_key) or kayit["metin"]
-    sonuc = st.session_state.sonuc
+    sonuc = _aktif_sonuc(fac_id)
     tasarim_var = tur_id in tasarim.TASARIMLAR
+
+    # ---------- AI GÖRSEL ÜRETİMİ (gerçek fotoğraf/resim) ----------
+    st.markdown("### 🖼️ AI Görseli")
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        gorsel_aktif = st.button(
+            "🎨 AI Görsel Üret",
+            key=f"gorsel_{fac_id}_{tur_id}",
+            help="Tesis + tercihlerinle Gemini görsel modeli gerçek bir fotoğraf/resim üretir (şablon değil).",
+            width='stretch',
+        )
+    with c2:
+        st.caption("Şablondan bağımsız; tema, vurgu ve notlar kullanılır.")
+    if gorsel_aktif:
+        try:
+            with st.spinner("AI görseli üretiliyor (görsel modelleri ayrı kota kullanır)..."):
+                gorsel_bytes = ai_engine.gorsel_uret(tur_id, st.session_state.tesis or {}, sonuc or None, p)
+            save_media(fac_id, tur_id, icerik, gorsel=gorsel_bytes)
+            st.toast("AI görseli üretildi ve kaydedildi.")
+            st.rerun()
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Görsel üretimi başarısız: {e}")
+
+    gorsel_yol = kayit.get("gorsel_yol")
+    if gorsel_yol and os.path.exists(gorsel_yol):
+        with open(gorsel_yol, "rb") as f:
+            gorsel_bytes = f.read()
+        st.image(gorsel_bytes, width='stretch')
+        st.download_button(
+            "⬇️ AI Görseli İndir (PNG)",
+            data=gorsel_bytes,
+            file_name=f"KarbonAT_{tur_id}_{fac_id}_ai.png",
+            mime="image/png",
+            key=f"mga_{fac_id}_{tur_id}",
+            width='stretch',
+        )
+    else:
+        st.caption("Henüz AI görseli yok — yukarıdaki düğmeyle üretin.")
+
+    st.markdown("---")
 
     if tasarim_var:
         t_duzen = tasarim.TASARIMLAR[tur_id]
         st.markdown("### 🎨 Görsel Çıktı")
         if not sonuc:
-            st.caption("Not: Hesaplama verilmediği için sayı kartları boş görünür; önce adım 4'te hesaplama yapın.")
+            st.caption("Not: Bu tesis için henüz hesaplama kaydı yok; sayı kartları boş görünür. Önce adım 4'te hesaplama yapın.")
+            sonuc = {}
         html = getattr(tasarim, t_duzen["html"])(sonuc, icerik)
         if "png" in t_duzen:
             png = getattr(tasarim, t_duzen["png"])(sonuc, icerik, tur_id)
-            st.image(png, use_container_width=True)
+            st.image(png, width='stretch')
             with st.expander("Ayrıca web / HTML görünümü", expanded=False):
-                components.html(html, height=520, scrolling=True)
+                st.html(html, height=520)
         else:
             with st.expander("Canlı önizleme", expanded=True):
-                components.html(html, height=660, scrolling=True)
+                st.html(html, height=660)
 
         with st.expander("✏️ Ham içeriği düzenle (markdown)", expanded=False):
             st.text_area("İçerik", value=icerik, height=380, key=mte_key)
@@ -1378,7 +2174,7 @@ def _icerik_detay(fac_id, tur):
             try:
                 st.download_button("🖼️ PDF", data=getattr(tasarim, tasarim.TASARIMLAR[tur_id]["pdf"])(sonuc, icerik),
                                    file_name=f"KarbonAT_{tur_id}_{fac_id}.pdf", mime="application/pdf",
-                                   key=f"mpdf_{fac_id}_{tur_id}", use_container_width=True)
+                                   key=f"mpdf_{fac_id}_{tur_id}", width='stretch')
             except Exception as e:  # noqa: BLE001
                 st.warning(f"PDF: {e}")
         if "png" in t_duzen:
@@ -1386,21 +2182,21 @@ def _icerik_detay(fac_id, tur):
                 st.download_button("🏞️ PNG", data=png,
                                    file_name=f"KarbonAT_{tur_id}_{fac_id}.png",
                                    mime="image/png",
-                                   key=f"mpng_{fac_id}_{tur_id}", use_container_width=True)
+                                   key=f"mpng_{fac_id}_{tur_id}", width='stretch')
             with cols[2]:
                 st.download_button("🌐 HTML", data=html.encode("utf-8"),
                                    file_name=f"KarbonAT_{tur_id}_{fac_id}.html", mime="text/html",
-                                   key=f"mthtml_{fac_id}_{tur_id}", use_container_width=True)
+                                   key=f"mthtml_{fac_id}_{tur_id}", width='stretch')
             with cols[3]:
                 try:
                     st.download_button("📄 Word", data=raporlar.rapor_docx(icerik),
                                        file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                       key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+                                       key=f"mdoc_{fac_id}_{tur_id}", width='stretch')
                 except Exception as e:  # noqa: BLE001
                     st.warning(f"Word: {e}")
             with cols[4]:
-                if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+                if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", width='stretch'):
                     save_media(fac_id, tur_id, icerik)
                     st.toast("Düzenleme kaydedildi.")
                     st.rerun()
@@ -1408,17 +2204,17 @@ def _icerik_detay(fac_id, tur):
             with cols[1]:
                 st.download_button("🌐 HTML", data=html.encode("utf-8"),
                                    file_name=f"KarbonAT_{tur_id}_{fac_id}.html", mime="text/html",
-                                   key=f"mthtml_{fac_id}_{tur_id}", use_container_width=True)
+                                   key=f"mthtml_{fac_id}_{tur_id}", width='stretch')
             with cols[2]:
                 try:
                     st.download_button("📄 Word", data=raporlar.rapor_docx(icerik),
                                        file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                       key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+                                       key=f"mdoc_{fac_id}_{tur_id}", width='stretch')
                 except Exception as e:  # noqa: BLE001
                     st.warning(f"Word: {e}")
             with cols[3]:
-                if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+                if st.button("💾 Kaydet", key=f"msav_{fac_id}_{tur_id}", width='stretch'):
                     save_media(fac_id, tur_id, icerik)
                     st.toast("Düzenleme kaydedildi.")
                     st.rerun()
@@ -1439,7 +2235,7 @@ def _icerik_detay(fac_id, tur):
         try:
             st.download_button("⬇️ PDF", data=raporlar.rapor_pdf(icerik),
                                file_name=f"KarbonAT_{tur_id}_{fac_id}.pdf", mime="application/pdf",
-                               key=f"mpdf_{fac_id}_{tur_id}", use_container_width=True)
+                               key=f"mpdf_{fac_id}_{tur_id}", width='stretch')
         except Exception as e:  # noqa: BLE001
             st.warning(f"PDF: {e}")
     with d2:
@@ -1447,11 +2243,11 @@ def _icerik_detay(fac_id, tur):
             st.download_button("📄 Word (.docx)", data=raporlar.rapor_docx(icerik),
                                file_name=f"KarbonAT_{tur_id}_{fac_id}.docx",
                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                               key=f"mdoc_{fac_id}_{tur_id}", use_container_width=True)
+                               key=f"mdoc_{fac_id}_{tur_id}", width='stretch')
         except Exception as e:  # noqa: BLE001
             st.warning(f"Word: {e}")
     with d3:
-        if st.button("💾 Düzenlemeyi Kaydet", key=f"msav_{fac_id}_{tur_id}", use_container_width=True):
+        if st.button("💾 Düzenlemeyi Kaydet", key=f"msav_{fac_id}_{tur_id}", width='stretch'):
             save_media(fac_id, tur_id, icerik)
             st.toast("Düzenleme kaydedildi.")
             st.rerun()
@@ -1466,7 +2262,7 @@ def _icerik_grid(fac_id, grup_id, turler):
         durum = "✅ Kayıtlı" if kayit else "⏳ Beklemede"
         with cols[i % SUTUN]:
             if st.button(f"{tur['emoji']} {tur['baslik']}", key=f"mcd_{fac_id}_{grup_id}_{tur['id']}",
-                         use_container_width=True):
+                         width='stretch'):
                 st.session_state[secim_key] = tur["id"]
                 st.rerun()
             st.caption(f"{durum} · {' · '.join(tur.get('ciktilar', []))}")
@@ -1479,6 +2275,7 @@ def _icerik_grid(fac_id, grup_id, turler):
 
 
 def adim_icerik():
+    st.markdown(mvp_stepper(active=4), unsafe_allow_html=True)
     tesis = st.session_state.tesis
     if not tesis or not tesis.get("id"):
         st.warning("Önce bir tesis seçin.")

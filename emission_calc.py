@@ -6,17 +6,26 @@
 from factors import EMISSION_FACTORS, SCOPE_ATAMASI
 
 
-def hesapla_scope_ayrimi(tuketim_dict):
+def hesapla_scope_ayrimi(tuketim_dict, yenilenebilir_oran=0):
     """
     Girdi: {kategori: {alt_tür: miktar}} formatında tüketim.
+    yenilenebilir_oran: % cinsinden (0-100), Scope 2 elektrikten düşülür.
     Çıktı: scope1/scope2/scope3 dağılımı + kategori toplamları.
     """
     scope_toplamlari = {"scope1": 0.0, "scope2": 0.0, "scope3": 0.0}
     kategori_toplamlari = {}
 
+    # Elektrik kategorisi için yenilenebilir oran uygula
+    elektrik_yenilenebilir_ef = EMISSION_FACTORS.get("Elektrik", {}).get("Şebeke (yenilenebilir YEK-G sertifikalı)", 0.0)
+    elektrik_standart_ef = EMISSION_FACTORS.get("Elektrik", {}).get("Şebeke (yenilenebilir olmayan)", 0.0)
+
     for kategori, alt_turler in tuketim_dict.items():
         kategori_emisyon = 0.0
         scope_key = SCOPE_ATAMASI.get(kategori, "scope3")
+
+        # scope13 = scope1 + scope3 (araç filosu + seyahat)
+        if scope_key == "scope13":
+            scope_key = "scope1"  # yakıt Scope 1, seyahat Scope 3 - ayrı toplama gerekirse genişletilebilir
 
         for alt_tur, miktar in alt_turler.items():
             if miktar is None or miktar <= 0:
@@ -27,6 +36,11 @@ def hesapla_scope_ayrimi(tuketim_dict):
             scope_toplamlari[scope_key] += emisyon
 
         kategori_toplamlari[kategori] = kategori_emisyon
+
+    # Yenilenebilir oranı Scope 2 elektrikten düş
+    if yenilenebilir_oran > 0 and scope_toplamlari["scope2"] > 0:
+        indirim = scope_toplamlari["scope2"] * (yenilenebilir_oran / 100.0)
+        scope_toplamlari["scope2"] = max(0.0, scope_toplamlari["scope2"] - indirim)
 
     toplam = sum(scope_toplamlari.values())
 

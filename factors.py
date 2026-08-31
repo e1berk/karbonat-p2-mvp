@@ -17,13 +17,29 @@ EMISSION_FACTORS = {
         "Güneş Enerjisi (PV)": 0.045,  # kgCO₂e/kWh (yaşam döngüsü)
         "Rüzgar Enerjisi": 0.013,  # kgCO₂e/kWh
     },
-    "Doğal Gaz": {
-        # kgCO₂e/m³ (yakma emisyonu — Scope 1)
+    "Doğal Gaz ve Yakıtlar": {
+        # kgCO₂e/m³ veya kgCO₂e/kg (yakma emisyonu — Scope 1)
         "Doğalgaz (m³)": 2.02,
         "LNG (m³)": 2.75,
-        "LPG (kg)": 2.94,  # kgCO₂e/kg
+        "LPG (kg)": 2.94,
         "Propan (m³)": 2.98,
-        "Kömür (ton)": 2.420,  # kgCO₂e/kg (ton başına, hesaplama için ton girilir)
+        "Kömür (kg)": 2.420,  # kgCO₂e/kg
+    },
+    "Soğutucu & F-Gaz (Scope 1)": {
+        # kgCO₂e/kg (soğutucu kaçağı — GWP100)
+        "R-410A (kg)": 2088,
+        "R-407C (kg)": 1774,
+        "R-32 (kg)": 675,
+        "R-134a (kg)": 1430,
+        "Diğer (kg)": 1500,
+    },
+    "Araç Filosu & İş Seyahatleri (Scope 1/3)": {
+        # kgCO₂e/km veya kgCO₂e/L
+        "Benzinli Araç (L)": 2.31,
+        "Dizel Araç (L)": 2.68,
+        "Uçak İç Hat (km/yolcu)": 0.18,
+        "Uçak Dış Hat (km/yolcu)": 0.12,
+        "Tren (km/yolcu)": 0.04,
     },
     "Su": {
         # Scope 3 - su arıtma ve atık su işleme
@@ -61,7 +77,9 @@ EMISSION_FACTORS = {
 # Kullanıcıya gösterilecek açıklamalar
 KATEGORI_ACIKLAMALARI = {
     "Elektrik": "Türkiye şebeke ortalaması 0,478 kgCO₂e/kWh kullanılmıştır. YE-G sertifikalı elektrik sıfır emisyon kabul edilir.",
-    "Doğal Gaz": "Yerinde yakma (Scope 1) emisyonlarıdır. Birimler kcal/kg veya m³ bazında olabilir.",
+    "Doğal Gaz ve Yakıtlar": "Yerinde yakma (Scope 1) emisyonlarıdır. Doğalgaz, kömür, LPG, LNG, propan birimleri kgCO₂e/kg veya m³.",
+    "Soğutucu & F-Gaz (Scope 1)": "Soğutucu gaz kaçağı (R-410A, R-32 vb.) — GWP100 değerleriyle kgCO₂e/kg cinsinden.",
+    "Araç Filosu & İş Seyahatleri (Scope 1/3)": "Benzin/dizel yakıt tüketimi (Scope 1) ve uçak/tren seyahatleri (Scope 3).",
     "Su": "Şebeke suyu arıtma + atık su arıtma emisyonları dahildir (Scope 3).",
     "Gıda Tüketimi": "Tedarik zinciri emisyonları (Scope 3). Hayvansal ürünlerin emisyonu yüksektir.",
     "Atık Yönetimi": "Atık bertaraf süreçlerinin salımı (Scope 3). Geri dönüşümle azalır.",
@@ -72,13 +90,15 @@ KATEGORI_ACIKLAMALARI = {
 # ============================================
 # SCOPE ATAMASI (HCMI Metodolojisi)
 # ============================================
-# Scope 1: Doğrudan yakma (fosil yakıt, doğalgaz, kömür)
+# Scope 1: Doğrudan yakma (fosil yakıt, doğalgaz, kömür, soğutucu)
 # Scope 2: Satın alınan elektrik
-# Scope 3: Gıda, su arıtma, atık bertaraf, kimyasal
+# Scope 3: Gıda, su arıtma, atık bertaraf, kimyasal, araç filosu, iş seyahatleri
 
 SCOPE_ATAMASI = {
     "Elektrik": "scope2",   # tüm elektrik kalemleri scope 2
-    "Doğal Gaz": "scope1",  # yerinde yakma
+    "Doğal Gaz ve Yakıtlar": "scope1",  # yerinde yakma
+    "Soğutucu & F-Gaz (Scope 1)": "scope1",
+    "Araç Filosu & İş Seyahatleri (Scope 1/3)": "scope13",
     "Su": "scope3",        # su arıtma emisyonu
     "Gıda Tüketimi": "scope3",
     "Atık Yönetimi": "scope3",

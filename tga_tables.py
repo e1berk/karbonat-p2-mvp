@@ -71,27 +71,60 @@ def tablo10_elektrik(tuketim):
 
 
 def tablo11_enerji(tuketim):
-    """Enerji Tablosu — yenilenebilir oranı."""
+    """Enerji Tablosu — yenilenebilir oranı (elektrik + doğal gaz + yakıtlar + araç filosu)."""
+    from factors import EMISSION_FACTORS, SCOPE_ATAMASI
     rows = []
     yenilenebilir_kwh = 0.0
-    for alt_tur, miktar in _aktif(tuketim, ELEKTRIK_KATEGORI).items():
+    # Elektrik
+    for alt_tur, miktar in _aktif(tuketim, "Elektrik").items():
         is_yenilenebilir = alt_tur in YENILENEBILIR_ELEKTRIK
         if is_yenilenebilir:
             yenilenebilir_kwh += miktar
         rows.append({
             "Enerji Kaynağı": alt_tur,
-            "Tüketim (kWh)": miktar,
+            "Kategori": "Elektrik",
+            "Birim": "kWh",
+            "Tüketim": miktar,
             "Yenilenebilir": "Evet" if is_yenilenebilir else "Hayır",
         })
+    # Doğal Gaz ve Yakıtlar
+    for alt_tur, miktar in _aktif(tuketim, "Doğal Gaz ve Yakıtlar").items():
+        rows.append({
+            "Enerji Kaynağı": alt_tur,
+            "Kategori": "Doğal Gaz ve Yakıtlar",
+            "Birim": "m³ / kg",
+            "Tüketim": miktar,
+            "Yenilenebilir": "Hayır",
+        })
+    # Soğutucu & F-Gaz
+    for alt_tur, miktar in _aktif(tuketim, "Soğutucu & F-Gaz (Scope 1)").items():
+        rows.append({
+            "Enerji Kaynağı": alt_tur,
+            "Kategori": "Soğutucu & F-Gaz",
+            "Birim": "kg",
+            "Tüketim": miktar,
+            "Yenilenebilir": "Hayır",
+        })
+    # Araç Filosu & İş Seyahatleri
+    for alt_tur, miktar in _aktif(tuketim, "Araç Filosu & İş Seyahatleri (Scope 1/3)").items():
+        rows.append({
+            "Enerji Kaynağı": alt_tur,
+            "Kategori": "Araç Filosu & Seyahat",
+            "Birim": "L / km",
+            "Tüketim": miktar,
+            "Yenilenebilir": "Hayır",
+        })
     if not rows:
-        return pd.DataFrame(columns=["Enerji Kaynağı", "Tüketim (kWh)", "Yenilenebilir"])
+        return pd.DataFrame(columns=["Enerji Kaynağı", "Kategori", "Birim", "Tüketim", "Yenilenebilir"])
 
-    toplam_kwh = sum(r["Tüketim (kWh)"] for r in rows)
-    oran = (yenilenebilir_kwh / toplam_kwh * 100) if toplam_kwh > 0 else 0.0
+    toplam = sum(r["Tüketim"] for r in rows)
+    yen_oran = (yenilenebilir_kwh / toplam * 100) if toplam > 0 else 0.0
     rows.append({
         "Enerji Kaynağı": "TOPLAM",
-        "Tüketim (kWh)": toplam_kwh,
-        "Yenilenebilir": f"{oran:.1f}% yenilenebilir",
+        "Kategori": "",
+        "Birim": "",
+        "Tüketim": toplam,
+        "Yenilenebilir": f"{yen_oran:.1f}% yenilenebilir (elektrik bazında)",
     })
     return pd.DataFrame(rows)
 
@@ -156,6 +189,35 @@ def kimyasal_envanter(tuketim):
     return pd.DataFrame(rows)
 
 
+def tablo6_ekip(tesis=None):
+    """Tablo 6 - Sürdürülebilirlik Ekibi Görev Listesi (TGA şablon). Deterministik şablon."""
+    rows = [
+        {"Görev / Sorumluluk": "Sürdürülebilirlik Koordinasyonu", "Sorumlu": "Genel Müdür / GM Yardımcısı", "Sıklık": "Aylık", "Açıklama": "Strateji, bütçe ve rapor onayı"},
+        {"Görev / Sorumluluk": "Enerji & Karbon Takibi", "Sorumlu": "Teknik Müdür", "Sıklık": "Aylık", "Açıklama": "TGA Tablo 10-11 verilerinin toplanması ve doğrulanması"},
+        {"Görev / Sorumluluk": "Su & Atık Takibi", "Sorumlu": "Kat Hizmetleri / Housekeeping", "Sıklık": "Aylık", "Açıklama": "Tablo 12-13 ve kimyasal envanter"},
+        {"Görev / Sorumluluk": "Satın Alma & Tedarikçi Değerlendirme", "Sorumlu": "Satın Alma Müdürü", "Sıklık": "Çeyreklik", "Açıklama": "Tablo 7 - sürdürülebilir tedarik kriterleri"},
+        {"Görev / Sorumluluk": "Personel Eğitimleri", "Sorumlu": "İK / Sürdürülebilirlik Elçisi", "Sıklık": "Çeyreklik", "Açıklama": "Eğitim kayıtları ve farkındalık anketleri"},
+        {"Görev / Sorumluluk": "Misafir İletişimi", "Sorumlu": "Ön Büro / Pazarlama", "Sıklık": "Sürekli", "Açıklama": "Broşür, QR, sosyal medya ve anket"},
+        {"Görev / Sorumluluk": "İç Denetim & Düzeltici Faaliyet", "Sorumlu": "Kalite Müdürü", "Sıklık": "Yarıyıllık", "Açıklama": "Hedef takibi ve iyileştirme planı"},
+    ]
+    if tesis and tesis.get("ad"):
+        rows[0]["Açıklama"] += f" — {tesis['ad']}"
+    return pd.DataFrame(rows)
+
+
+def tablo7_tedarikci(tuketim=None):
+    """Tablo 7 - Tedarikçi Değerlendirme Formu (TGA şablon). Deterministik şablon + tüketimden otomatik doldurma."""
+    base = [
+        {"Tedarikçi Kategorisi": "Gıda", "Kriter": "Yerel / mevsimsel ürün oranı", "Puan (1-5)": "", "Not": ""},
+        {"Tedarikçi Kategorisi": "Gıda", "Kriter": "Sertifikalı ürün (organik/MSC vb.)", "Puan (1-5)": "", "Not": ""},
+        {"Tedarikçi Kategorisi": "Kimyasal", "Kriter": "Çevre etiketli / biyobozunur ürün", "Puan (1-5)": "", "Not": ""},
+        {"Tedarikçi Kategorisi": "Enerji", "Kriter": "YEK-G / yenilenebilir tedarik", "Puan (1-5)": "", "Not": ""},
+        {"Tedarikçi Kategorisi": "Atık Yönetimi", "Kriter": "Lisanslı bertaraf / geri dönüşüm", "Puan (1-5)": "", "Not": ""},
+        {"Tedarikçi Kategorisi": "Genel", "Kriter": "Sürdürülebilirlik politikası beyanı", "Puan (1-5)": "", "Not": ""},
+    ]
+    return pd.DataFrame(base)
+
+
 def tum_tablolar(sonuc, period=""):
     """Tüm TGA tablolarını sözlük olarak döner. sonuc: {tesis, tuketim, scope, metrikler, ...}"""
     tesis = sonuc["tesis"]
@@ -182,6 +244,8 @@ def tum_tablolar(sonuc, period=""):
 
     return {
         "Ozet": pd.DataFrame(ozet_rows),
+        "Tablo6_Ekip": tablo6_ekip(tesis),
+        "Tablo7_Tedarikci": tablo7_tedarikci(tuketim),
         "Tablo10_Elektrik": tablo10_elektrik(tuketim),
         "Tablo11_Enerji": tablo11_enerji(tuketim),
         "Tablo12_Su": tablo12_su(tuketim, dolu, musteri),

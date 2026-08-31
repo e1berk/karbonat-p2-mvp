@@ -184,11 +184,16 @@ def _deterministik_xlsx(sablon_id: str, sonuc: dict) -> bytes:
         df = tablo13_atik(tuketim)
     else:
         raise ValueError(f"Bilinmeyen deterministik şablon: {sablon_id}")
-    import openpyxl  # noqa: F401
 
     buffer = BytesIO()
     with __import__("pandas").ExcelWriter(buffer, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Tablo", index=False)
+        ws = writer.sheets["Tablo"]
+        # Denetime hazır stil – aynı helper
+        try:
+            _xlsx_stil_uygula(ws, df)
+        except Exception:
+            pass
     return buffer.getvalue()
 
 
@@ -285,19 +290,94 @@ def _docx_ekle_blok(doc, blok):
         df = icerik
         if doc.tables:
             doc.add_paragraph()
-        tablo = doc.add_table(rows=1, cols=max(1, len(df.columns)))
+        ncols = max(1, len(df.columns))
+        tablo = doc.add_table(rows=1, cols=ncols)
         tablo.style = "Light Grid Accent 1"
+        tablo.autofit = True
+        # Dar kenar boşlukları – geniş tablo sığsın
+        try:
+            from docx.shared import Inches
+            for sec in doc.sections:
+                sec.left_margin = Inches(0.5)
+                sec.right_margin = Inches(0.5)
+                sec.top_margin = Inches(0.5)
+                sec.bottom_margin = Inches(0.5)
+        except Exception:
+            pass
+        # Başlık satırı stil
+        from docx.shared import Pt, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml.ns import qn
+        header_cells = tablo.rows[0].cells
         for j, c in enumerate(df.columns):
-            tablo.rows[0].cells[j].text = str(c)
-        for _, row in df.iterrows():
+            cell = header_cells[j]
+            cell.text = ""
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(str(c))
+            run.bold = True
+            run.font.size = Pt(7.5 if ncols >= 8 else 8.5)
+            run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+            # Arkaplan
+            shading = cell._element.get_or_add_tcPr()
+            shd = shading.makeelement(qn('w:shd'), {
+                qn('w:fill'): '1d6b45', qn('w:val'): 'clear'
+            })
+            shading.append(shd)
+            # Hücre kenar boşluğu
+            cell.vertical_alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for pp in cell.paragraphs:
+                pp.paragraph_format.space_after = Pt(2)
+        # Veri satırları – zebra
+        for idx, (_, row) in enumerate(df.iterrows()):
             hucreler = tablo.add_row().cells
             for j, v in enumerate(row):
                 if j < len(hucreler):
-                    hucreler[j].text = "" if pd.isna(v) else str(v)
+                    cell = hucreler[j]
+                    cell.text = ""
+                    p = cell.paragraphs[0]
+                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    txt = "" if pd.isna(v) else str(v)
+                    run = p.add_run(txt)
+                    run.font.size = Pt(7 if ncols >= 8 else 8)
+                    run.font.color.rgb = RGBColor(0x1A, 0x1F, 0x1C)
+                    # zebra arka plan
+                    if idx % 2 == 1:
+                        shading = cell._element.get_or_add_tcPr()
+                        shd = shading.makeelement(qn('w:shd'), {
+                            qn('w:fill'): 'eef4ee', qn('w:val'): 'clear'
+                        })
+                        shading.append(shd)
+                    # Wrap
+                    p.paragraph_format.space_after = Pt(1)
+        # Kolon genişlikleri – ağırlıklı dağıtım (docx autofit ile orantılı)
+        # docx autofit True olduğundan manuel genişlik ayarı opsiyonel; en uzun metne göre orantı için width hint verelim
+        try:
+            from docx.shared import Inches
+            total_in = 7.5  # kullanılabilir genişlik
+            weights = []
+            for col in df.columns:
+                hlen = len(str(col))
+                max_cell = max((len(str(v)) for v in df[col].astype(str)), default=0) if len(df) else 0
+                w = max(hlen, max_cell, 4)
+                w = min(w, 28)
+                weights.append(w)
+            tot = sum(weights) or 1
+            for i, w in enumerate(weights):
+                # width hint
+                target = total_in * w / tot
+                # En dar sütun 0.6 in altına düşmesin
+                target = max(target, 0.55)
+                for row in tablo.rows:
+                    row.cells[i].width = Inches(target)
+        except Exception:
+            pass
         return
     for satir in icerik.splitlines():
         s = satir.strip()
         if not s:
+            continue
+        if s in ("---", "***", "___") or set(s) <= {"-", "*", "_"}:
             continue
         if s.startswith("### "):
             doc.add_heading(s[4:].replace("**", ""), level=2)
@@ -305,17 +385,56 @@ def _docx_ekle_blok(doc, blok):
             doc.add_heading(s[3:].replace("**", ""), level=1)
         elif s.startswith("# "):
             doc.add_heading(s[2:].replace("**", ""), level=0)
-        elif s.startswith(("-", "*")):
-            doc.add_paragraph(s.lstrip("-* ").replace("**", ""), style="List Bullet")
+        elif s.startswith("- ") or s.startswith("* ") or s.startswith("• "):
+            txt = s.lstrip("-*• ").replace("**", "").strip()
+            if not txt or set(txt) <= {"-", "–", "—"}:
+                continue
+            doc.add_paragraph(txt, style="List Bullet")
         else:
             doc.add_paragraph(s.replace("**", ""))
 
 
 def rapor_docx(metin: str) -> bytes:
-    """Markdown'ı gerçek Word tablolarıyla .docx yapar."""
+    """Markdown'ı gerçek Word tablolarıyla .docx yapar – geniş tablolar dar kenar boşluğu + wrap ile sığar."""
     from docx import Document
+    from docx.shared import Inches
 
     doc = Document()
+    # Dar kenar boşlukları
+    for sec in doc.sections:
+        sec.left_margin = Inches(0.5)
+        sec.right_margin = Inches(0.5)
+        sec.top_margin = Inches(0.6)
+        sec.bottom_margin = Inches(0.5)
+    # Kurumsal kapak başlığı
+    try:
+        from docx.shared import Pt, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = p.add_run("KarbonAT P2  ·  GSTC / TGA Uyumlu  ·  Denetime Hazır")
+        r.bold = True
+        r.font.size = Pt(9)
+        r.font.color.rgb = RGBColor(0x1D, 0x6B, 0x45)
+        p.paragraph_format.space_after = Pt(6)
+        # ince ayırıcı
+        p2 = doc.add_paragraph()
+        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r2 = p2.add_run("—" * 48)
+        r2.font.size = Pt(6)
+        r2.font.color.rgb = RGBColor(0xCF, 0xD8, 0xCF)
+        p2.paragraph_format.space_after = Pt(8)
+        # Footer için section footer (opsiyonel)
+        try:
+            footer = sec.footer.paragraphs[0]
+            footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            fr = footer.add_run("KarbonAT P2  ·  Gerçek veriden üretildi  ·  TGA/GSTC uyumlu")
+            fr.font.size = Pt(7)
+            fr.font.color.rgb = RGBColor(0x6B, 0x7A, 0x70)
+        except Exception:
+            pass
+    except Exception:
+        pass
     for blok in markdown_bloklar(metin):
         _docx_ekle_blok(doc, blok)
     buffer = BytesIO()
@@ -324,20 +443,131 @@ def rapor_docx(metin: str) -> bytes:
 
 
 # ---------------- XLSX (tablo başına ayrı sayfa) ----------------
+def _xlsx_stil_uygula(ws, df, is_metin=False):
+    """openpyxl Worksheet'e denetime hazır stil uygular: başlık, zebra, wrap, filter, freeze."""
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    HEADER_FILL = PatternFill(start_color="1D6B45", end_color="1D6B45", fill_type="solid")
+    HEADER_FONT = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
+    HEADER_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ZEBRA_FILL = PatternFill(start_color="EEF4EE", end_color="EEF4EE", fill_type="solid")
+    CELL_ALIGN = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    THIN = Side(style="thin", color="CFD8CF")
+    BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+    ncols = len(df.columns) if not is_metin else 1
+    nrows = len(df) + 1 if not is_metin else len(df) + 1
+    # Başlık satırı
+    for col_idx in range(1, ncols + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = HEADER_ALIGN
+        cell.border = BORDER
+    # Zebra
+    for r in range(2, nrows + 1):
+        is_zebra = (r % 2 == 0)  # 2. satır beyaz, 3. satır zebra vb – değiştirilebilir
+        for c in range(1, ncols + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.alignment = CELL_ALIGN
+            cell.border = BORDER
+            cell.font = Font(name="Calibri", size=9 if ncols < 8 else 8)
+            if is_zebra and r >= 3 and (r % 2 == 1):
+                cell.fill = ZEBRA_FILL
+            # Sayısal hücreleri sağa hizala
+            try:
+                if isinstance(cell.value, (int, float)):
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
+            except Exception:
+                pass
+    # Kolon genişlikleri – içerik tabanlı ama sınırlı
+    for col_idx, col_name in enumerate(df.columns, 1):
+        # En uzun metin
+        max_len = len(str(col_name))
+        for val in df[col_name].astype(str):
+            if len(val) > max_len:
+                max_len = len(val)
+        # Genişlik = char * 1.1 + padding, 12-38 arası
+        width = min(38, max(12, max_len * 1.05 + 2))
+        # Çok sütunlu tablolarda genişlikleri küçült
+        if ncols >= 10:
+            width = min(width, 18)
+        elif ncols >= 7:
+            width = min(width, 24)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    # Yükseklik – başlık daha yüksek (wrap için)
+    ws.row_dimensions[1].height = 28 if ncols >= 8 else 20
+    for r in range(2, nrows + 1):
+        ws.row_dimensions[r].height = 16
+    # Freeze + Filter
+    ws.freeze_panes = "A2"
+    try:
+        ws.auto_filter.ref = ws.dimensions
+    except Exception:
+        pass
+    # Yazdırma ayarları
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.orientation = "landscape" if ncols >= 7 else "portrait"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.4
+    ws.page_margins.right = 0.4
+    ws.page_margins.top = 0.5
+    ws.page_margins.bottom = 0.5
+    ws.print_title_rows = "1:1"
+
+
 def rapor_xlsx(metin: str) -> bytes:
-    """Markdown tablolarını ayrı sayfalara; kalan metni 'Metin' sayfasına yazar."""
+    """Markdown tablolarını ayrı sayfalara; kalan metni 'Metin' sayfasına yazar – kurumsal Kapak + styled & printable."""
+    from datetime import datetime
     buffer = BytesIO()
     bloklar = markdown_bloklar(metin)
     tablolar = [b for b in bloklar if b[0] == "tablo"]
     metinler = [b[1] for b in bloklar if b[0] == "md"]
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        # --- Kapak sayfası (kurumsal kimlik) ---
+        from openpyxl.styles import Font, Alignment, PatternFill
+        kapak = pd.DataFrame([
+            ["KarbonAT P2 – Rapor Eki (AI)"],
+            [f"Oluşturulma: {datetime.now().strftime('%d.%m.%Y %H:%M')}"],
+            [""],
+            ["Bu dosya KarbonAT tarafından tesisin gerçek verilerinden üretilmiştir."],
+            ["Tablolar denetime hazır, filtreli ve yazdırma ayarlıdır."],
+            ["Her tablo ayrı sayfadadır; 'Metin' sayfasında anlatı bölümleri yer alır."],
+            ["GSTC / TGA uyumlu – KarbonAT P2"],
+        ])
+        kapak.to_excel(writer, sheet_name="Kapak", index=False, header=False)
+        ws_k = writer.sheets["Kapak"]
+        ws_k["A1"].font = Font(name="Calibri", size=13, bold=True, color="1D6B45")
+        ws_k["A1"].alignment = Alignment(horizontal="left", vertical="center")
+        ws_k["A2"].font = Font(name="Calibri", size=9, color="6B7A70")
+        for r in range(4, 8):
+            ws_k.cell(row=r, column=1).font = Font(name="Calibri", size=9, color="17201c")
+            ws_k.cell(row=r, column=1).alignment = Alignment(wrap_text=True, vertical="center")
+        ws_k.column_dimensions["A"].width = 78
+        ws_k.row_dimensions[1].height = 18
+        ws_k.sheet_properties.pageSetUpPr.fitToPage = True
+        ws_k.page_setup.orientation = "portrait"
+        ws_k.page_setup.paperSize = ws_k.PAPERSIZE_A4
+        ws_k.page_setup.fitToWidth = 1
+        ws_k.page_margins.left = 0.6
+        ws_k.page_margins.right = 0.6
+
         for i, (_, df) in enumerate(tablolar):
-            df.to_excel(writer, sheet_name=f"Tablo_{i + 1}"[:31], index=False)
+            sheet = f"Tablo_{i + 1}"[:31]
+            df.to_excel(writer, sheet_name=sheet, index=False)
+            ws = writer.sheets[sheet]
+            _xlsx_stil_uygula(ws, df)
         if metinler:
             metin_df = pd.DataFrame({"İçerik": [m for p in metinler for m in p.splitlines() if m.strip()]})
             metin_df.to_excel(writer, sheet_name="Metin", index=False)
+            ws = writer.sheets["Metin"]
+            _xlsx_stil_uygula(ws, metin_df, is_metin=True)
+            ws.column_dimensions["A"].width = 90
+            ws.column_dimensions["A"].width = 85
         if not tablolar and not metinler:
-            pd.DataFrame().to_excel(writer, sheet_name="Bos", index=False)
+            pd.DataFrame({"Bilgi": ["İçerik yok – AI raporu boş"]}).to_excel(writer, sheet_name="Bos", index=False)
     return buffer.getvalue()
 
 
@@ -372,58 +602,173 @@ def _pdf_font_ayar():
     return _PDF_FONTLAR
 
 
+def _pdf_table(df, avail_w, font_ad, font_bold):
+    """DataFrame'i sığan, wrap'li bir ReportLab Table'a çevirir."""
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.platypus import Paragraph, Table, TableStyle
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+
+    ncols = len(df.columns)
+    # Font boyutu – sütun sayısına göre küçült
+    if ncols <= 5:
+        fs, hfs = 7.5, 8.0
+    elif ncols <= 7:
+        fs, hfs = 6.8, 7.2
+    elif ncols <= 10:
+        fs, hfs = 6.0, 6.5
+    else:
+        fs, hfs = 5.4, 5.8
+
+    # Sütun ağırlıkları – uzun metni sınırlayarak orantılı dağıtım
+    weights = []
+    for col in df.columns:
+        hlen = len(str(col))
+        max_cell = 0
+        if len(df):
+            try:
+                max_cell = max(len(str(v)) for v in df[col].astype(str) if str(v) != "nan")
+            except Exception:
+                max_cell = hlen
+        w = max(hlen, max_cell, 4)
+        w = min(w, 30)  # çok uzun metin ağırlığı sınırlı – wrap ile sığar
+        # Dar sütunlar (No, Etki, Olasılık) için minimum ağırlık
+        if hlen <= 3:
+            w = max(w, 4)
+        weights.append(w)
+    tot = sum(weights) or 1
+    col_widths = [avail_w * w / tot for w in weights]
+    # Minimum genişlik koruması: her sütun en az 28pt olsun
+    col_widths = [max(cw, 28) for cw in col_widths]
+    # Toplam avail_w'yi aşarsa orantılı küçült
+    s = sum(col_widths)
+    if s > avail_w:
+        scale = avail_w / s
+        col_widths = [cw * scale for cw in col_widths]
+
+    # Hücre stilleri – wrap'li Paragraph
+    cell_style = ParagraphStyle("cell", fontName=font_ad, fontSize=fs, leading=fs * 1.25 + 0.5,
+                                textColor=colors.HexColor("#1a1f1c"), alignment=TA_LEFT,
+                                spaceBefore=1, spaceAfter=1, wordWrap="CJK")
+    header_style = ParagraphStyle("header", fontName=font_bold, fontSize=hfs, leading=hfs * 1.2 + 0.5,
+                                  textColor=colors.white, alignment=TA_CENTER,
+                                  spaceBefore=1, spaceAfter=1, wordWrap="CJK")
+
+    def _escape(s):
+        return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    header_row = [Paragraph(_escape(str(c)), header_style) for c in df.columns]
+    data = [header_row]
+    for _, row in df.iterrows():
+        data.append([Paragraph(_escape("" if pd.isna(v) else str(v)), cell_style) for v in row])
+
+    t = Table(data, colWidths=col_widths, repeatRows=1, hAlign="LEFT")
+    # Zarif stil
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d6b45")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#cfd8cf")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef4ee")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#143a28")),
+    ]))
+    return t
+
+
 def rapor_pdf(metin: str) -> bytes:
-    """Rapor metnini Türkçe karakter destekli PDF'e çevirir; tablolar gerçek PDF tablosu olur."""
-    from reportlab.lib.pagesizes import A4
+    """Rapor metnini Türkçe karakter destekli PDF'e çevirir; tablolar otomatik sığar (wrap + landscape + font adapt)."""
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import mm
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
     from reportlab.lib import colors
 
     font_ad, font_bold = _pdf_font_ayar()
     bold = font_bold or font_ad
     buffer = BytesIO()
-    stiller = getSampleStyleSheet()
-    baslik = ParagraphStyle("Bas", parent=stiller["Title"], fontName=bold, fontSize=14, spaceAfter=8)
-    h2 = ParagraphStyle("H2", parent=stiller["Heading2"], fontName=bold, fontSize=11.5, spaceBefore=6, spaceAfter=3)
-    govde = ParagraphStyle("Govde", parent=stiller["BodyText"], fontName=font_ad, fontSize=9, leading=13)
 
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=14 * mm, bottomMargin=14 * mm,
-                            leftMargin=14 * mm, rightMargin=14 * mm)
+    # Sayfa yönünü tablolara göre seç: >=8 sütun ise yatay daha ferah
+    bloklar = markdown_bloklar(metin)
+    max_cols = 0
+    for tur, ic in bloklar:
+        if tur == "tablo":
+            max_cols = max(max_cols, len(ic.columns))
+    pagesize = landscape(A4) if max_cols >= 8 else A4
+
+    stiller = getSampleStyleSheet()
+    baslik = ParagraphStyle("Bas", parent=stiller["Title"], fontName=bold, fontSize=14, spaceAfter=8,
+                            textColor=colors.HexColor("#1d6b45"), leading=16)
+    h2 = ParagraphStyle("H2", parent=stiller["Heading2"], fontName=bold, fontSize=11.5, spaceBefore=6, spaceAfter=3,
+                        textColor=colors.HexColor("#143a28"), leading=14)
+    h3 = ParagraphStyle("H3", parent=stiller["Heading3"], fontName=bold, fontSize=10, spaceBefore=5, spaceAfter=2,
+                        textColor=colors.HexColor("#2e8b57"), leading=12)
+    govde = ParagraphStyle("Govde", parent=stiller["BodyText"], fontName=font_ad, fontSize=9, leading=13,
+                           textColor=colors.HexColor("#1a1f1c"), spaceBefore=2, spaceAfter=2)
+    bullet = ParagraphStyle("Bullet", parent=govde, leftIndent=14, firstLineIndent=0, spaceBefore=2, spaceAfter=2,
+                            bulletIndent=7, alignment=0)
+
+    # Kurumsal header + footer (her sayfa)
+    def _header_footer(canvas, doc):
+        canvas.saveState()
+        w, h = pagesize
+        # Header band – kurumsal kimlik
+        canvas.setFillColor(colors.HexColor("#1d6b45"))
+        canvas.rect(0, h - 9*mm, w, 9*mm, fill=1, stroke=0)
+        canvas.setFillColor(colors.white)
+        canvas.setFont(bold, 9)
+        canvas.drawString(12*mm, h - 6*mm, "KarbonAT P2")
+        canvas.setFont(font_ad, 6.5)
+        # Sagda ince slogan
+        canvas.setFillColor(colors.HexColor("#c8e6c9"))
+        canvas.drawRightString(w - 12*mm, h - 6*mm, "GSTC / TGA Uyumlu  ·  Denetime Hazir")
+        # Footer
+        canvas.setFillColor(colors.HexColor("#6b7a70"))
+        canvas.setFont(font_ad, 6.5)
+        canvas.drawString(12*mm, 10*mm, "KarbonAT P2  ·  GSTC / TGA uyumlu  ·  Gercek veriden uretildi")
+        canvas.drawRightString(w - 12*mm, 10*mm, f"Sayfa {doc.page}")
+        canvas.setStrokeColor(colors.HexColor("#e3e9e3"))
+        canvas.setLineWidth(0.35)
+        canvas.line(12*mm, 12*mm, w - 12*mm, 12*mm)
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(buffer, pagesize=pagesize, topMargin=16*mm, bottomMargin=14*mm,
+                            leftMargin=12*mm, rightMargin=12*mm,
+                            title="KarbonAT Rapor", author="KarbonAT P2")
+    avail_w = doc.width
     akis = []
-    for tur, icerik in markdown_bloklar(metin):
+    for tur, icerik in bloklar:
         if tur == "tablo":
             df = icerik
-            veri = [[str(c) for c in df.columns]] + [[("" if pd.isna(v) else str(v)) for v in r] for r in df.itertuples(index=False)]
-            tablo = Table(veri, repeatRows=1, hAlign="LEFT")
-            tablo.setStyle(TableStyle([
-                ("FONTNAME", (0, 0), (-1, 0), bold),
-                ("FONTNAME", (0, 1), (-1, -1), font_ad),
-                ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1d6b45")),
-                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cfd8cf")),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef4ee")]),
-                ("LEFTPADDING", (0, 0), (-1, -1), 4),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ]))
-            akis.append(tablo)
-            akis.append(Spacer(1, 6))
+            t = _pdf_table(df, avail_w, font_ad, bold)
+            akis.append(t)
+            akis.append(Spacer(1, 7))
             continue
         for satir in icerik.splitlines():
-            satir = satir.strip()
-            if not satir:
+            s = satir.strip()
+            if not s:
+                akis.append(Spacer(1, 3))
+                continue
+            # Sadece '---' gibi ayraçları bullet sanma
+            if s in ("---", "***", "___") or set(s) <= {"-", "*", "_"}:
                 akis.append(Spacer(1, 4))
                 continue
-            if satir.startswith("### "):
-                akis.append(Paragraph(satir[4:].replace("**", ""), h2))
-            elif satir.startswith("# "):
-                akis.append(Paragraph(satir[2:].replace("**", ""), baslik))
-            elif satir.startswith(("-", "*")):
-                akis.append(Paragraph("• " + satir.lstrip("-* ").replace("**", ""), govde))
+            if s.startswith("### "):
+                akis.append(Paragraph(s[4:].replace("**", ""), h3))
+            elif s.startswith("## "):
+                akis.append(Paragraph(s[3:].replace("**", ""), h2))
+            elif s.startswith("# "):
+                akis.append(Paragraph(s[2:].replace("**", ""), baslik))
+            elif s.startswith("- ") or s.startswith("* ") or s.startswith("• "):
+                txt = s.lstrip("-*• ").replace("**", "").strip()
+                if not txt or set(txt) <= {"-", "–", "—"}:
+                    continue
+                # Kurumsal bullet – girintili
+                akis.append(Paragraph(txt, bullet, bulletText="•"))
             else:
-                akis.append(Paragraph(satir.replace("**", ""), govde))
-    doc.build(akis)
+                akis.append(Paragraph(s.replace("**", ""), govde))
+    doc.build(akis, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return buffer.getvalue()

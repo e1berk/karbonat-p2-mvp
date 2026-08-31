@@ -8,3 +8,5 @@ google-genai
 python-docx
 xlrd
 Pillow
+qrcode[pil]
+bcrypt

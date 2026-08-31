@@ -89,12 +89,96 @@ def rag_sorgu(soru: str, k: int = 4) -> list[dict]:
     ]
 
 
+def _sanitize(text: str, limit: int = 500) -> str:
+    """Kullanıcı girdisini prompt injection'a karşı temizle ve kısalt."""
+    if not text:
+        return ""
+    t = str(text).strip()[:limit]
+    # Yaygın override ifadelerini etkisizleştir
+    for pat in ["ignore previous", "önceki talimat", "sistem prompt", "system prompt", "green-claim yap", "0 emisyon yaz"]:
+        t = t.replace(pat, "[filtrelendi]")
+        t = t.replace(pat.upper(), "[filtrelendi]")
+    # Kontrol karakterleri temizle
+    t = t.replace("\n", " ").replace("\r", " ")
+    return t
+
+
 # ---------------- Tesis özeti (prompt için) ----------------
+def _hedef_odak(tur_id: str, prefs: dict) -> str:
+    """Kullanıcının seçtiği platform/hedef kitle/amaç/vurguyu AI için BAĞLAYICI talimata çevirir."""
+    satirlar = []
+
+    hedef = (prefs.get("hedef_kitle") or "Misafir").strip()
+    hedef_rehber = {
+        "Denetçi": (
+            "Hedef: DİKKATLİ bir DENETÇİ / otorite. Veriyi ve metodolojik adımları açık, "
+            "doğrulanabilir biçimde sun; yeşil iddia (green-claim) YAPMA, sayıları yuvarlama "
+            "gerekçesi ve kaynağıyla ver. Ton resmî ve kanıta dayalı olmalı."
+        ),
+        "Misafir": (
+            "Hedef: tesiste konaklayan MİSAFİR. Sıcak, kısa, anlaşılır anlat; somut rakamı "
+            "hikayeleştir, yönlendirici/metodik dilden kaçın."
+        ),
+        "Personel": (
+            "Hedef: otel PERSONELİ. Görev ve sorumluluk odaklı, uygulanabilir eylem dilinde yaz."
+        ),
+        "Yönetim": (
+            "Hedef: otel YÖNETİMİ / karar verici. Stratejik özet, maliyet/getiri ve aksiyon "
+            "vurgusu ağırlıklı olmalı."
+        ),
+        "Yatırımcı": (
+            "Hedef: YATIRIMCI. ESG performansı, risk yönetimi ve sürdürülebilir iş modeli "
+            "diliyle yaz."
+        ),
+    }
+    satirlar.append(hedef_rehber.get(hedef.split(" ")[0], hedef_rehber["Misafir"]))
+
+    platform = (prefs.get("platform") or "").strip()
+    if tur_id == "sosyal_medya" and platform and platform != "Tümü":
+        satirlar.append(
+            f"PLATFORM KİLİDİ: Yalnız {platform} için üret. ### bölümlerini SADECE "
+            f"{platform} için aç; diğer platformlara (Instagram/LinkedIn/X) HİÇBİR bölüm/taslak koyma."
+        )
+
+    icerik_turu = (prefs.get("icerik_turu") or "").strip()
+    if icerik_turu and icerik_turu not in ("", "Karma"):
+        ceviri = {
+            "İstatistik paylaşımı": "İstatistik / veri odaklı paylaşım",
+            "Hikaye / arka plan": "Hikaye / arka plan anlatımı",
+            "Etkinlik duyurusu": "Etkinlik duyurusu",
+        }.get(icerik_turu, icerik_turu)
+        satirlar.append(
+            f"İÇERİK KİLİDİ: Gönderi yalnız '{ceviri}' tarzında olmalı; başka gönderi türüne "
+            f"kayma."
+        )
+
+    amac = (prefs.get("amac") or "").strip()
+    if amac:
+        satirlar.append(f"AMAÇ: İçeriğin ana amacı '{amac}' — yazı buna hizmet etsin.")
+
+    vurgu = (prefs.get("vurgu") or "").strip()
+    if vurgu:
+        satirlar.append(f"VURGU: Tesisin '{vurgu}' konusunu öne çıkar.")
+
+    ton = (prefs.get("ton") or "").strip()
+    if ton:
+        satirlar.append(f"TON: '{ton}'.")
+
+    notlar = _sanitize(prefs.get("notlar") or "", limit=500)
+    if notlar:
+        satirlar.append(f"KULLANICI NOTU: {notlar}")
+
+    return "\n".join(satirlar)
+
+
 def _tesis_ozeti(tesis: dict, sonuc: dict | None) -> str:
+    ad = _sanitize(tesis.get('ad',''), 80)
     if not sonuc:
         return (
-            f"Tesis: {tesis.get('ad','')} · {tesis.get('m2','?')} m² · "
+            f"Tesis: {ad} · {tesis.get('m2','?')} m² · "
             f"{tesis.get('oda','?')} oda · {tesis.get('personel','?')} personel"
+            f"\nHESAPLANMIŞ EMİSYON VERİSİ YOK: hiçbir 0/ton/sayı yazma; somut rakam "
+            f"yoksa genel ve temkinli sürdürülebilirlik ifadeleriyle yaz."
         )
     m = sonuc.get("metrikler", {})
     s = sonuc.get("statik", {})
@@ -129,7 +213,7 @@ TUR_GOREV = {
     "brosur": "Yalnız misafir broşürüne BASILACAK hazır metin üret: başlık, kısa bölümler, madde/istatistik vurgulu. Kapak ve bölüm başlıklarını ### ile işaretle.",
     "qr": "Yalnız oda/QR kartının ÜZERİNDE görünecek hazır metin üret: tek cümlelik ana mesaj, 3-4 ikon/sayı başlığı (örn. 'Su Tasarrufu %32'), QR doğrulama açıklaması. Talimat/prompt YAZMA.",
     "basin_bulteni": "Yalnız yayınlanmaya HAZIR basın bülteni metni üret: manşet, spot, gelişme paragrafları, yönetimden alıntı, iletişim. 'bülten şöyle olmalı' anlatımı YASAK.",
-    "sosyal_medya": "Yalnız paylaşılabilecek HAZIR gönderi metinleri üret; her platform (Instagram/LinkedIn/X) için ayrı ### bölümü: gönderi metni + hashtagler + görsel alt yazısı. 'şöyle yapın' anlatımı YASAK.",
+    "sosyal_medya": "Yalnız paylaşılabilecek HAZIR gönderi metinleri üret. PLATFORM TERCİHİNE UY: eğer tek platform seçilmişse SADECE onun ### bölümünü yaz, diğer platformlara bölüm AÇMA. Gönderi metni + hashtagler + görsel alt yazısı. 'şöyle yapın' anlatımı YASAK.",
     "politika": "Yalnız sürdürülebilirlik politikası özeti üret; taahhüt maddeleri ve sorumluluk. Hazır politika metni yaz, talimat değil.",
     "egitim": "Yalnız personel eğitim kayıt/planlama içeriği üret: eğitim takvimi, konular, katılımcı kaydı.",
     "gorsel_afis": "Yalnız afişe/postere BASILACAK hazır metin üret: büyük başlık, alt başlık/slogan, 3 sayı kartı, kısa bölüm metinleri, rozet ve QR yönlendirme. Image-prompt/üretim talimatı/kompozisyon tarifi KESİNLİKLE YAZMA.",
@@ -160,6 +244,15 @@ def _rag_filtreli(soru: str, terimler: list[str], k: int = 4) -> list[dict]:
     alt = [r for r in sonuclar
            if any(t.lower() in r["kaynak"].lower() for t in terimler)]
     return (alt or sonuclar)[:k]
+
+
+def _is_retryable(e: Exception) -> bool:
+    s = str(e).lower()
+    if "429" in s or "resource_exhausted" in s or "quota" in s or "retry" in s or "unavailable" in s or "deadline" in s or "500" in s or "503" in s:
+        return True
+    if "400" in s or "403" in s or "401" in s or "invalid" in s or "not found" in s or "404" in s:
+        return False
+    return True
 
 
 def _retry_bekle(e: Exception) -> float:
@@ -203,6 +296,8 @@ def _gemini_cagir(prompt: str) -> str:
                 return metin
             except Exception as e:  # noqa: BLE001 — model fallback
                 hata = e
+                if not _is_retryable(e):
+                    raise RuntimeError(f"Üretim hatası (yeniden denenemez): {e}") from e
                 gec = _retry_bekle(e)
                 beklenen += gec
                 print(
@@ -215,6 +310,128 @@ def _gemini_cagir(prompt: str) -> str:
         if beklenen >= MAX_BEKLE:
             break
     raise RuntimeError(f"Tüm üretim modelleri başarısız (kota 90sn aşıldı). Son hata: {hata}")
+
+
+# ---------------- Görsel Üretimi ----------------
+GORSEL_MODELS = [
+    os.environ.get("GEMINI_IMAGE_MODEL", ""),
+    "gemini-2.5-flash-image",
+    "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-image",
+]
+GORSEL_MODELS = [m for m in GORSEL_MODELS if m]
+
+# Ücretsiz ve anahtarsız görsel üretimi — Pollinations.ai
+# https://image.pollinations.ai/prompt/{prompt}?model=flux&width=...&height=...
+POLLINATIONS_IMAGE = "https://image.pollinations.ai/prompt/"
+POLLINATIONS_MODEL = os.environ.get("POLLINATIONS_MODEL", "flux")
+
+
+def gorsel_uret(
+    tur_id: str,
+    tesis: dict,
+    sonuc: dict | None,
+    prefs: dict,
+) -> bytes:
+    """Tesis verisi + tercihlere göre AI ile gerçek görsel üretir.
+
+    Pollinations.ai (ücretsiz, anahtar gerektirmez) kullanılır. Yanıt PNG'ye
+    çevrilip döndürülür. Kullanılamazsa açık teşhisli RuntimeError fırlatır.
+    """
+    tur = tur_bul(tur_id)
+    baslik = tur["baslik"] if tur else tur_id
+    prompt = _gorsel_prompt(baslik, tur_id, tesis, sonuc, prefs)
+
+    import urllib.parse
+    import urllib.request
+
+    last_err = None
+    for deneme in range(3):
+        url = POLLINATIONS_IMAGE + urllib.parse.quote(prompt) + (
+            f"?width=1024&height=1024&model={POLLINATIONS_MODEL}&nologo=true&seed={_rastgele_seed()}"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "KarbonAT/0.4 (image generator)"})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                data = r.read()
+            if data:
+                break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            s = str(e).lower()
+            # 429 throttle ise kısa bekle ve tekrar dene
+            if "429" in s or "429" in str(getattr(e, 'code', '')):
+                time.sleep(4 + deneme * 4)
+                continue
+            if deneme < 2:
+                time.sleep(2)
+                continue
+            raise RuntimeError(f"Pollinations.ai görsel üretimi başarısız: {e}") from e
+    else:
+        if not data:
+            raise RuntimeError(f"Pollinations.ai boş yanıt döndü. Son hata: {last_err}")
+
+    # Pollinations JPEG/PNG dönebilir; tutarlı PNG'ye çevir.
+    from io import BytesIO
+    from PIL import Image
+
+    try:
+        im = Image.open(BytesIO(data))
+        buf = BytesIO()
+        im.convert("RGB").save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception as e:  # noqa: BLE001
+        return data
+
+
+def _rastgele_seed() -> int:
+    import random
+
+    return random.randint(0, 2**31 - 1)
+
+
+def _gorsel_prompt(baslik: str, tur_id: str, tesis: dict, sonuc: dict | None, prefs: dict) -> str:
+    """Görsel üretimi için ayrıntılı, görsel-odaklı istem hazırlar (İngilizce)."""
+    tesis_ad = _sanitize(tesis.get("ad", "Tesis"), 60)
+    yer = _sanitize(tesis.get("il", "Turkey"), 30)
+
+    vurgu = _sanitize(prefs.get("vurgu", "Çevre & İklim"), 40)
+    tema = _sanitize(prefs.get("tema", "orman"), 20)
+    stil = _sanitize(prefs.get("stil", "modern"), 40)
+    notlar = _sanitize(prefs.get("notlar", ""), 300)
+
+    ozellikler = {
+        "web": "a clean professional hero image for the hotel's sustainability webpage",
+        "brosur": "an elegant, natural and inviting cover image for a sustainability brochure",
+        "qr": "a minimal modern and calm background for a room door / QR card",
+        "basin_bulteni": "a trustworthy, corporate and bright image for a press release",
+        "sosyal_medya": "an eye-catching, high-contrast, shareable image for a social media post",
+        "politika": "a professional official cover image for a sustainability policy document",
+        "egitim": "a warm, educational, people-focused image for staff sustainability training",
+        "gorsel_afis": "a strong poster/composition image with a clear message",
+        "anket_misafir": "a friendly inviting image for a guest survey cover",
+        "anket_personel": "a professional neutral image for a staff survey cover",
+    }
+
+    not_metni = f" Extra guidance: {notlar}." if notlar else ""
+    tema_en = {
+        "orman": "green forest, natural", "okyanus": "ocean, coastal", "gün batımı": "sunset warm tones",
+        "minimal": "clean minimal", "pastel": "soft pastel colors", "koyu": "dark elegant",
+        "toprak": "earth tones, natural", "marka": "brand colors, modern",
+    }.get(tema, tema)
+    stil_en = {
+        "modern": "modern", "klasik": "classic", "doğal": "natural", "lüks": "luxurious",
+        "Fotorealist": "photorealistic", "Minimal / modern": "minimal modern", "İllüstrasyon": "illustration",
+        "Otel markasına uyarlansın": "brand-adapted modern",
+    }.get(stil, stil)
+
+    return (
+        f"Photorealistic, professional stock-style image: {ozellikler.get(tur_id, baslik + ' for the hotel')}. "
+        f"Sustainable hotel '{tesis_ad}' in {yer}, Turkey. "
+        f"Theme emphasis: {vurgu}. Visual theme: {tema_en}. Style: {stil_en}.{not_metni} "
+        f"No text, no letters, no watermark. Natural light, high resolution, balanced composition. "
+        f"Subtle realistic sustainability elements such as solar panels, green roofs and natural landscaping."
+    )
 
 
 # ---------------- Üretim ----------------
@@ -233,6 +450,8 @@ def uretim_olustur(
     iskelet_md = "\n".join(f"  {i}. {b}" for i, b in enumerate(iskelet, 1))
 
     tercih_md = "\n".join(f"  • {k}: {v}" for k, v in prefs.items() if v not in ("", None))
+
+    hedef_odak = _hedef_odak(tur_id, prefs)
 
     tesis_md = _tesis_ozeti(tesis, sonuc)
 
@@ -267,6 +486,9 @@ TESİS VERİSİ (somut rakamları AYNEN kullan, uydurma):
 TASARIM TERCİHLERİ (bunlara uy):
 {tercih_md}
 
+HEDEF ODAK (seçimlerin — bunlar KATI talimat, genel sürdürülebilirlik yazma):
+{hedef_odak}
+
 REFERANS ŞABLONLAR (RAG; TGA'nın gerçek şablon/politika dili — bu dilden ve maddelerden ilham al, birebir kopyalama):
 {rag_md}
 
@@ -274,6 +496,7 @@ KURALLAR:
 - Yalnız markdown çıktı, giriş cümlesi yok.
 - KESİNLİKLE talimat, yönerge, prompt, 'nasıl yapılır' açıklaması VEYA tasarım/kompozisyon tarifi yazma. Çıktı yalnızca ürünün üzerinde/basılacak halinde GÖRÜNECEK SON HAZIR METİN olmalı.
 - Bölüm/alan başlıklarını markdown başlığı olarak yaz (### Başlık) — tasarım motoru bunları görselde başlık olarak kullanır.
+- TESİS VERİSİ'ndeki gerçek rakamları (toplam emisyon, scope, oda-gün, m², müşteri başına) çıktıda KULLAN; '0 emisyon', 'sıfır karbon' veya varsayımsal/tahmini sayı ÜRETME.
 - Rakipleri/hukuk dili/yanlış iddia (green-claim) kullanma; somut veri yoksa genel ve temkinli yaz.
 - Türkçe (dil tercihi farklıysa ona uy).
 - İçerik uzunluğu: {prefs.get('uzunluk','Orta')}.
