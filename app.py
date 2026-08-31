@@ -1536,7 +1536,9 @@ def _rapor_detay(fac_id, period, sab, sonuc, tesis, prefs):
                 try:
                     fallback = _ai_fallback_rapor(sab, tesis, sonuc)
                     save_report(fac_id, period, sab_id, fallback, tip="ai-fallback")
-                    st.info("AI kotası dolu — geçici deterministik taslak kaydedildi. Birkaç dakika sonra Yenile ile zenginleştirebilirsiniz.")
+                    st.session_state.pop(rte_key, None)
+                    st.info("AI kotası dolu — geçici deterministik taslak kaydedildi. Aşağıda açıldı; birkaç dakika sonra Yenile ile zenginleştirebilirsiniz.")
+                    st.rerun()
                 except Exception:
                     pass
             else:

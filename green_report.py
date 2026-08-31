@@ -116,13 +116,23 @@ def save_green_report(sonuc, period="", onceki=None):
     sonuc: {tesis, statik, tuketim, scope, metrikler, en_agir}
     onceki: aynı yapıda önceki dönem kaydı (karşılaştırma için, opsiyonel)
     """
+    if not isinstance(sonuc, dict):
+        sonuc = {}
+    # onceki hem record dict hem sonuc dict hem de bozuk int gelebilir
+    if isinstance(onceki, dict) and "sonuc" in onceki and isinstance(onceki["sonuc"], dict):
+        onceki = onceki["sonuc"]
+    if not isinstance(onceki, dict):
+        onceki = {}
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
 
-    tesis = sonuc.get("tesis") or {"ad": "Tesis", "m2": 0, "oda": 0, "personel": 0, "musteri": 0, "dolu_oda_gun": 0}
-    metrik = sonuc.get("metrikler") or {"toplam_kg": 0, "toplam_ton": 0, "oda_gun_kg": 0, "m2_aylik_kg": 0, "musteri_kg": 0, "scope1_kg": 0, "scope2_kg": 0, "scope3_kg": 0}
-    scope = sonuc.get("scope") or {"scope1": 0, "scope2": 0, "scope3": 0, "toplam": 0}
+    _t = sonuc.get("tesis")
+    tesis = _t if isinstance(_t, dict) else {"ad": str(_t) if _t else "Tesis", "m2": 0, "oda": 0, "personel": 0, "musteri": 0, "dolu_oda_gun": 0}
+    _m = sonuc.get("metrikler")
+    metrik = _m if isinstance(_m, dict) else {"toplam_kg": 0, "toplam_ton": 0, "oda_gun_kg": 0, "m2_aylik_kg": 0, "musteri_kg": 0, "scope1_kg": 0, "scope2_kg": 0, "scope3_kg": 0}
+    _s = sonuc.get("scope")
+    scope = _s if isinstance(_s, dict) else {"scope1": 0, "scope2": 0, "scope3": 0, "toplam": 0}
     _en = sonuc.get("en_agir", [])
     # en_agir her türlü şekle karşı dayanıklı hale getir
     en_agir = []
@@ -150,7 +160,8 @@ def save_green_report(sonuc, period="", onceki=None):
                 except Exception:
                     continue
         en_agir = tmp
-    tuketim = sonuc.get("tuketim") or {}
+    _tuk = sonuc.get("tuketim")
+    tuketim = _tuk if isinstance(_tuk, dict) else {}
 
     # onceki: hem record dict hem sonuc dict hem de bozuk int gelebilir — hepsini normalize et
     if isinstance(onceki, dict) and "sonuc" in onceki and isinstance(onceki["sonuc"], dict):

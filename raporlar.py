@@ -583,7 +583,11 @@ def _pdf_font_ayar():
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
+    # Önce proje içindeki Roboto (repo ile birlikte gelir, Linux'ta da Türkçe destekler)
+    proj_root = os.path.dirname(os.path.abspath(__file__))
     adaylar = [
+        ("Roboto", os.path.join(proj_root, "Roboto-Regular.ttf"), "Roboto-Bold", os.path.join(proj_root, "Roboto-Regular.ttf")),
+        ("RobotoData", os.path.join(proj_root, "data", "Roboto-Regular.ttf"), "RobotoData-Bold", os.path.join(proj_root, "data", "Roboto-Regular.ttf")),
         ("ArialTR", r"C:\Windows\Fonts\arial.ttf", "ArialTR-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
         ("DejaVuSans", r"C:\Windows\Fonts\dejavusans.ttf", "DejaVuSans-Bold", r"C:\Windows\Fonts\dejavusans-bold.ttf"),
         ("TimesNewRomanTR", r"C:\Windows\Fonts\times.ttf", "TimesNewRomanTR-Bold", r"C:\Windows\Fonts\timesbd.ttf"),
